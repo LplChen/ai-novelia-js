@@ -5,6 +5,7 @@
 // @description  在 n.novelia.cc 网络小说、文库小说、阅读历史、收藏夹页面抓取书籍信息，生成书单。
 // @author       Gemini
 // @match        https://n.novelia.cc/*
+// @match        https://n.sakura-share.one/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_setClipboard
