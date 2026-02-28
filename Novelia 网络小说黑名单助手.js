@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Novelia 网络小说黑名单助手
 // @namespace    https://n.novelia.cc/
-// @version      1.2
-// @description  在网络小说搜索页和详情页添加拉黑按钮，管理黑名单，支持本地导入/导出黑名单
+// @version      1.3.0
+// @description  在小说搜索页和详情页添加拉黑按钮，在操作面板管理黑名单，支持本地导入/导出黑名单
 // @author       Claude
-// @match        https://n.novelia.cc/novel*
+// @match        https://n.novelia.cc/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_addStyle
@@ -564,8 +564,8 @@
           <div class="nm-section">
             <div class="nm-section-title">说明</div>
             <div class="nm-notice">
-              📌 搜索屏蔽特定 Tags 详见
-              <a href="https://n.novelia.cc/forum/64f3d63f794cbb1321145c07" target="_blank">论坛使用指南区的教程</a>。<br>
+              📌 小说 Tags 的搜索屏蔽详见
+              <a href="https://n.novelia.cc/forum" target="_blank">论坛使用指南区的教程</a>。<br>
               本功能仅管理您手动拉黑的小说（以链接为唯一识别依据）。<br>
               数据以 JSON 格式存储，可用记事本查看和编辑。
             </div>
