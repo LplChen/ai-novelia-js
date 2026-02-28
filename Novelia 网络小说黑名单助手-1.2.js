@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Novelia 网络小说黑名单助手
 // @namespace    https://n.novelia.cc/
-// @version      1.2.0
+// @version      1.2
 // @description  在网络小说搜索页和详情页添加拉黑按钮，管理黑名单，支持本地导入/导出黑名单
 // @author       Claude
 // @match        https://n.novelia.cc/novel*
