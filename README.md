@@ -13,6 +13,6 @@
 - 支持本地导入、导出黑名单数据
 - 操作面板支持自动跟随网站主题色，手动选择亮色或暗色
 
-## LightNovel.jp搜索脚本（Gemini写的）
+## LightNovel.jp 绿站文库搜索按钮（Gemini写的）
 - 在LightNovel.jp的[发售列表](https://lightnovel.jp/publicationdate/)书籍标题后增加绿站文库搜索按钮
 - 搜索时去掉了书名末尾的卷号后缀（对于书名中间的第*部或外传等字眼未作处理）
