@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         LightNovel.jp 绿站文库搜索按钮
+// @name         LightNovel.jp搜索脚本
 // @namespace    http://tampermonkey.net/
-// @version      1.2
+// @version      1.3
 // @description  在LightNovel.jp的书籍标题后增加去噪后的Novelia搜索按钮
 // @author       Gemini
 // @match        https://lightnovel.jp/publicationdate/*
@@ -45,10 +45,10 @@
         title = title.replace(/(\(|（|<|【|\[)[^)）>】\]]*?(\)|）|>|】|\])/g, '');
 
         // 2. 去除特定的卷号标识词：LV1, LV.2, ep.1, ep.02 (不区分大小写)
-        title = title.替换(/\s*(LV|ep|sp)\.?\s*\d+/gi, '');
+        title = title.replace(/\s*(LV|ep|sp)\.?\s*\d+/gi, '');
 
         // 3. 去除罗马数字：Ⅰ、Ⅱ...
-        title = title.replace(/[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+/g, '');
+        title = title.replace(/[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ]+/g, '');
 
         // 4. 去除行尾的纯数字或类似 "02" 的编号 (需小心不要误删书名原本的数字，通常卷号前有空格)
         title = title.replace(/\s+\d{1,3}$/, '');
@@ -58,10 +58,13 @@
         title = title.replace(/\s+0*\d+\s*$/, '');
 
         // 6. 去除尾部可能残留的标点符号
-        title = title.替换(/[.,:;!?。，、！？\s]+$/, '');
+        title = title.replace(/[.,:;!?。，、！？\s]+$/, '');
 
         // 7. 去除末尾紧连的数字 (针对卷号和书名连在一起的情况)
         title = title.replace(/\d+$/, '');
+
+        // 8. 去除带圈数字：①、②...
+        title = title.replace(/[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]+/g, '');
 
         return title.trim();
     }
@@ -82,7 +85,7 @@
             } else {
                  // 回退方案：获取所有文本但排除我们自己添加的按钮文本
                  // 由于我们先获取文本再添加按钮，直接用innerText即可
-                 rawTitle = td.innerText.替换("🔍 Novelia", "").trim();
+                 rawTitle = td.innerText.replace("🔍 Novelia", "").trim();
             }
 
             const cleanName = cleanTitleText(rawTitle);
