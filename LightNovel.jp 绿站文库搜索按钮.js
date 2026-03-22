@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         LightNovel.jp搜索脚本
+// @name         LightNovel.jp 绿站文库搜索按钮
 // @namespace    http://tampermonkey.net/
 // @version      1.3
 // @description  在LightNovel.jp的书籍标题后增加去噪后的Novelia搜索按钮
