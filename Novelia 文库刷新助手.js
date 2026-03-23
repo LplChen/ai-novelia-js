@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         绿站文库刷新助手
+// @name         Novelia 文库刷新助手
 // @namespace    http://tampermonkey.net/
 // @version      4.0
 // @description  自动刷新文库元数据。支持后台运行，自动翻页，可动态调整并发窗口数量。
