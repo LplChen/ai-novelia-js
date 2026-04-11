@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         LightNovel.jp 绿站文库搜索按钮
+// @name         LightNovel.jp搜索脚本
 // @namespace    http://tampermonkey.net/
-// @version      1.3
+// @version      1.5
 // @description  在LightNovel.jp的书籍标题后增加去噪后的Novelia搜索按钮
 // @author       Gemini
 // @match        https://lightnovel.jp/publicationdate/*
@@ -41,30 +41,50 @@
         let title = text;
 
         // 1. 去除全角/半角括号及其内容：(上), (1), <中>, 【下】, （02）
-        // 正则解释：匹配 ( 或 （ 或 < 或 【 或 [ 开始，非闭合符号的内容，直到对应的闭合符号
         title = title.replace(/(\(|（|<|【|\[)[^)）>】\]]*?(\)|）|>|】|\])/g, '');
 
-        // 2. 去除特定的卷号标识词：LV1, LV.2, ep.1, ep.02 (不区分大小写)
-        title = title.replace(/\s*(LV|ep|sp)\.?\s*\d+/gi, '');
+        // 2. 提前去除尾部可能残留的标点符号和空格
+        // (极重要：防止类似 "Title iv." 结尾的句号阻挡末尾罗马数字的正则匹配)
+        title = title.replace(/[.,:;!?。，、！？\s\-・]+$/, '');
 
-        // 3. 去除罗马数字：Ⅰ、Ⅱ...
-        title = title.replace(/[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ]+/g, '');
+        // 3. 去除特定的卷号标识词及其后面的内容 (新增对 vol.ii, ep.iv 这种带罗马数字组合的支持)
+        // 提取罗马字母匹配池供组合使用
+        const romanPattern = "(?:(?:[XＸxｘ][CＣcｃ]|[XＸxｘ][LＬlｌ]|[LＬlｌ][XＸxｘ]{0,3}|[XＸxｘ]{1,3})(?:[IＩiｉ][XＸxｘ]|[IＩiｉ][VＶvｖ]|[VＶvｖ][IＩiｉ]{0,3}|[IＩiｉ]{1,3})?|(?:[IＩiｉ][XＸxｘ]|[IＩiｉ][VＶvｖ]|[VＶvｖ][IＩiｉ]{0,3}|[IＩiｉ]{1,3}))";
+        const volumeRegex = new RegExp(`\\s*(?:LV|ep|sp|ex|extra|NO.|vol|volume)\\.?\\s*(?:\\d+|${romanPattern})`, 'gi');
+        title = title.replace(volumeRegex, '');
 
-        // 4. 去除行尾的纯数字或类似 "02" 的编号 (需小心不要误删书名原本的数字，通常卷号前有空格)
+        // 4. 去除 Unicode 专用罗马数字字符 (Ⅰ, Ⅱ, ⅰ, ⅱ...) 以及 日文常见的带圈数字 (①, ②, ㉑...)
+        // \u2160-\u217F 覆盖大写和小写 Unicode 罗马数字
+        // \u2460-\u2473, \u3251-\u325F, \u32B1-\u32BF 覆盖 1 到 50 的带圈数字
+        title = title.replace(/[\u2160-\u217F\u2460-\u2473\u3251-\u325F\u32B1-\u32BF]+/g, '');
+
+        // 5. 去除由普通英文字母拼写的罗马数字卷号 (支持 1-99，包含 x, i, v 等所有小写情况)
+        const romanTens = "(?:[XＸxｘ][CＣcｃ]|[XＸxｘ][LＬlｌ]|[LＬlｌ][XＸxｘ]{0,3}|[XＸxｘ]{1,3})";
+        const romanUnits = "(?:[IＩiｉ][XＸxｘ]|[IＩiｉ][VＶvｖ]|[VＶvｖ][IＩiｉ]{0,3}|[IＩiｉ]{1,3})";
+
+        // 匹配锚定在末尾的罗马数字
+        const romanRegex = new RegExp(`(?:${romanTens}(?:${romanUnits})?|${romanUnits})$`);
+
+        title = title.replace(romanRegex, (match, offset, string) => {
+            if (offset === 0) return '';
+            const prevChar = string.charAt(offset - 1);
+            // 防误删机制：如果罗马数字前面紧挨着普通英文字母，当作英文单词保留 (如 Matrix 保留 ix)。
+            // 如果前面是中日文或空格，安全删除。
+            if (/[a-zA-Zａ-ｚＡ-Ｚ]/.test(prevChar)) {
+                return match;
+            }
+            return '';
+        });
+
+        // 6. 去除行尾的纯数字卷号 (带空格情况)
         title = title.replace(/\s+\d{1,3}$/, '');
-
-        // 5. 再次清理可能残留的卷号文字，如 "1", "02" 等单独出现的
-        // 如果前面处理完了，这里主要处理行尾残留
         title = title.replace(/\s+0*\d+\s*$/, '');
 
-        // 6. 去除尾部可能残留的标点符号
-        title = title.replace(/[.,:;!?。，、！？\s]+$/, '');
+        // 7. 去除末尾紧连的数字 (如 Overlord16)
+        title = title.replace(/(\D+)\d+$/, '$1');
 
-        // 7. 去除末尾紧连的数字 (针对卷号和书名连在一起的情况)
-        title = title.replace(/\d+$/, '');
-
-        // 8. 去除带圈数字：①、②...
-        title = title.replace(/[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]+/g, '');
+        // 8. 再次清理彻底暴露的尾部标点
+        title = title.replace(/[.,:;!?。，、！？\s\-・]+$/, '');
 
         return title.trim();
     }
