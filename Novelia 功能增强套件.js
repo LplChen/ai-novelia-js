@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Novelia 功能增强套件
 // @namespace    https://n.novelia.cc/
-// @version      1.6.0
+// @version      1.7.0
 // @description  整合LightNovel搜索、书单助手、黑名单管理、简介自动排版。支持统一UI面板与模块化开关。
 // @author       Gemini&Claude
 // @match        https://n.novelia.cc/*
@@ -445,7 +445,7 @@
                 const snapX = c.x < window.innerWidth / 2 ? 16 : window.innerWidth - 60;
                 btn.style.transition = 'left 0.25s, top 0.25s';
                 applyPos(snapX, c.y);
-                setTimeout(() => btn.style.transition = '', 280);
+                setTimeout(() => { btn.style.transition = ''; }, 280);
                 GM_setValue(STORE_UI_POS, { x: snapX, y: c.y });
             } else {
                 togglePanel();
@@ -779,10 +779,11 @@
     // ============================================================
     // 初始化路由引擎
     // ============================================================
-    let isMegaInitialized = false; // 🌟 新增全局标记
+    let isMegaInitialized = false;
 
-    function bootstrap() {
-        if (isMegaInitialized) return; // 🌟 修复核心：如果已初始化过，直接跳过，防止 SPA 路由产生分身
+    // 将 bootstrap 改名为 initMegaPack
+    function initMegaPack() {
+        if (isMegaInitialized) return;
         isMegaInitialized = true;
 
         // 全局生效模块
@@ -796,13 +797,15 @@
         }
     }
 
-    // 注释掉容易导致重复注入的 pushState 监听
-    // 我们的 UI 是挂载在 body 上的，且内部已有 MutationObserver，SPA 跳转不需要重新初始化
+    // 将下面所有的 bootstrap 调用都改成 initMegaPack
+    const pushState = history.pushState;
+    history.pushState = function() { pushState.apply(history, arguments); setTimeout(initMegaPack, 500); };
+    window.addEventListener('popstate', () => setTimeout(initMegaPack, 500));
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', bootstrap);
+        document.addEventListener('DOMContentLoaded', initMegaPack);
     } else {
-        bootstrap();
+        initMegaPack();
     }
 
-})(); // 确保最后有这个闭合括号
+})();
