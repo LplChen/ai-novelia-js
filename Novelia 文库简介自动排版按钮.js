@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Novelia 文库简介自动排版按钮
+// @name       Novelia 文库简介自动排版按钮
 // @namespace    http://tampermonkey.net/
-// @version      2.0
-// @description  完美适配 Naive UI 的自动排版脚本，原生级 UI 融合，解决无法触发双向绑定的问题。
+// @version      3.0
+// @description  完美适配 Naive UI，限制按钮高度为line-height:1.25，新增 ● 作为前置换行符。
 // @author       Gemini
 // @match        *://n.novelia.cc/wenku-edit/*
 // @grant        none
@@ -38,36 +38,52 @@
 
             let chunk = remaining.substring(0, 71);
             let breakIdx = -1;
+            let breakOffset = 1; // 默认：在标点之后换行，保留标点在当前行
 
             // 规则 A：后引号接前引号 (如：” “)
             for (let i = 0; i < 70; i++) {
                 if (rightQuotes.test(chunk[i]) && leftQuotes.test(chunk[i+1])) {
                     breakIdx = i;
+                    breakOffset = 1;
                     break;
                 }
             }
 
-            // 规则 B：寻找71字内最后一个分界标点
+            // 规则 B：寻找71字内最后一个分界标点 或 ●
             if (breakIdx === -1) {
-                for (let i = 70; i >= 0; i--) {
-                    if (breakMarks.test(chunk[i])) {
+                // 注意：i > 0，防止刚到句首就碰到 ● 导致死循环（不在第0个字符前换行）
+                for (let i = 70; i > 0; i--) {
+                    if (chunk[i] === '●') {
                         breakIdx = i;
+                        breakOffset = 0; // 【核心新增】● 的特殊处理：在它之前换行，使其进入下一行
                         break;
                     }
+                    if (breakMarks.test(chunk[i])) {
+                        breakIdx = i;
+                        breakOffset = 1; // 常规标点：在它之后换行
+                        break;
+                    }
+                    // 破折号或省略号 (— 或 …)
                     if ((chunk[i] === '—' || chunk[i] === '…') && chunk[i-1] === chunk[i]) {
                         breakIdx = i;
+                        breakOffset = 1;
                         break;
                     }
                 }
             }
 
             if (breakIdx !== -1) {
-                result += remaining.substring(0, breakIdx + 1) + '\n';
-                remaining = remaining.substring(breakIdx + 1);
+                result += remaining.substring(0, breakIdx + breakOffset) + '\n';
+                remaining = remaining.substring(breakIdx + breakOffset);
             } else {
-                // 规则 C：如果71字内没标点，向后寻找第一个分界符
+                // 规则 C：如果71字内没有任何分界符，向后寻找第一个分界符
                 let found = false;
                 for (let i = 71; i < remaining.length; i++) {
+                    if (remaining[i] === '●') {
+                        result += remaining.substring(0, i) + '\n';
+                        remaining = remaining.substring(i);
+                        found = true; break;
+                    }
                     if (rightQuotes.test(remaining[i]) && i + 1 < remaining.length && leftQuotes.test(remaining[i+1])) {
                         result += remaining.substring(0, i + 1) + '\n';
                         remaining = remaining.substring(i + 1);
@@ -99,10 +115,8 @@
     function triggerVueUpdate(textarea, newText) {
         textarea.focus();
         textarea.select();
-        // 首选：通过模拟系统原生的文本插入来触发完整的数据流 (最可靠)
         const success = document.execCommand('insertText', false, newText);
 
-        // 备选：如果浏览器拦截了 execCommand，走底层 setter
         if (!success) {
             const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
             nativeInputValueSetter.call(textarea, newText);
@@ -110,7 +124,6 @@
             textarea.dispatchEvent(new Event('change', { bubbles: true }));
         }
 
-        // 滚动回顶部
         textarea.setSelectionRange(0, 0);
         textarea.blur();
     }
@@ -120,40 +133,48 @@
         const textarea = document.querySelector('.n-input__textarea-el[placeholder*="小说简介"]');
         if (!textarea) return;
 
-        // 寻找包含这个 textarea 的上一级 form-item，进而找到属于它的 feedback-wrapper
-        const formItem = textarea.closest('.n-form-item');
-        if (!formItem) return;
+        // 【更新】：精准寻找 class="n-form-item-blank"
+        const formItemBlank = textarea.closest('.n-form-item-blank');
+        if (!formItemBlank) return;
 
-        const feedbackWrapper = formItem.querySelector('.n-form-item-feedback-wrapper');
-        if (!feedbackWrapper || feedbackWrapper.querySelector('.custom-format-btn')) return;
+        // 【更新】：寻找它紧挨着的下一个元素 class="n-form-item-feedback-wrapper"
+        const feedbackWrapper = formItemBlank.nextElementSibling;
+        if (!feedbackWrapper || !feedbackWrapper.classList.contains('n-form-item-feedback-wrapper')) return;
 
-        // 调整 Wrapper 布局，使其靠右
+        if (feedbackWrapper.querySelector('.custom-format-btn')) return;
+
+        // 让 wrapper 变成 flex 容器，把按钮推到最右边
         feedbackWrapper.style.display = 'flex';
         feedbackWrapper.style.justifyContent = 'flex-end';
-        feedbackWrapper.style.paddingTop = '4px';
 
         // 创建按钮
         const formatBtn = document.createElement('button');
-        formatBtn.className = 'custom-format-btn'; // 打上标记防止重复注入
+        formatBtn.className = 'custom-format-btn';
 
-        // 【核心】窃取网站原有的“次级按钮”样式，完美实现主题随动
+        // 窃取网站原有的“次级按钮”主题（适配亮/暗色）
         const referenceButton = document.querySelector('.n-button--secondary');
         if (referenceButton) {
-            // 复制全部类名（包含了框架动态生成的 Hash 主题类名，如 __button-dark-...）
             formatBtn.className += ' ' + referenceButton.className;
-            // 将按钮尺寸强行修改为小号，更精致
-            formatBtn.classList.remove('n-button--medium-type', 'n-button--large-type');
-            formatBtn.classList.add('n-button--small-type');
+            // 剔除可能影响高度的原生大小类名
+            formatBtn.classList.remove('n-button--medium-type', 'n-button--large-type', 'n-button--small-type');
         } else {
-            // 兜底原生类名
-            formatBtn.className += ' n-button n-button--default-type n-button--small-type n-button--secondary';
+            formatBtn.className += ' n-button n-button--default-type n-button--secondary';
         }
 
-        // 去除继承自 referenceButton 的默认 tabindex 行为
         formatBtn.setAttribute('tabindex', '0');
         formatBtn.setAttribute('type', 'button');
 
-        // 按钮内容结构（匹配 Naive UI 内部结构）
+        // 【核心样式更新】：强制接管高度，保持原始 line-height: 1.25 不撑破容器
+        formatBtn.style.cssText = `
+            line-height: 1.25 !important;
+            height: auto !important;
+            min-height: 0 !important;
+            padding: 0px 8px !important;
+            font-size: 13px !important;
+            margin-left: auto !important;
+            align-self: flex-start;
+        `;
+
         formatBtn.innerHTML = `
             <span class="n-button__content">✨ 自动排版</span>
             <div aria-hidden="true" class="n-base-wave"></div>
@@ -161,9 +182,8 @@
             <div aria-hidden="true" class="n-button__state-border"></div>
         `;
 
-        // 绑定点击事件
         formatBtn.addEventListener('click', (e) => {
-            e.preventDefault(); // 阻止按钮可能的触发表单提交
+            e.preventDefault();
             const currentText = textarea.value;
             if (!currentText.trim()) return;
 
@@ -171,11 +191,10 @@
             triggerVueUpdate(textarea, formattedText);
         });
 
-        // 将按钮追加到 feedback-wrapper 最右侧
+        // 插入到 n-form-item-feedback-wrapper 内部
         feedbackWrapper.appendChild(formatBtn);
     }
 
-    // 使用 setInterval 替代 MutationObserver，在 SPA 路由切换时更稳定，且性能消耗更低
     setInterval(injectUI, 1000);
 
 })();
