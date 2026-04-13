@@ -154,7 +154,7 @@
             .m-item { padding: 10px; display: flex; align-items: center; gap: 12px; cursor: pointer; }
             .m-item input[type="checkbox"] { transform: scale(1.2); cursor: pointer; accent-color: var(--mega-primary); }
 
-            textarea.m-editor { width: 100%; flex: 1; resize: none; padding: 15px; font-family: monospace; line-height: 1.6; outline: none; border-radius: 4px; }
+            textarea.m-editor { width: 95%; flex: 1; resize: none; padding: 15px; font-family: monospace; line-height: 1.6; outline: none; border-radius: 4px; }
 
             /* 设置项 */
             .m-setting-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; padding: 10px; border-radius: 6px; background: rgba(128,128,128,0.05); }
