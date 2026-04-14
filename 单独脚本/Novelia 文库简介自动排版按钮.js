@@ -14,7 +14,7 @@
     // 核心排版逻辑
     function formatText(text) {
         // 1. 去除所有全角/半角空格和空行(换行符)
-        let cleanText = text.replace(/[\s\u3000]+/g, '');
+        let cleanText = text.替换(/[\s\u3000]+/g, '');
 
         // 2. 如果清理后字数依然超过500，终止排版，直接返回原文本
         if (cleanText.length > 500) return text;
