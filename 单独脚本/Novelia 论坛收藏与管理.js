@@ -31,7 +31,7 @@
         saveData() {
             GM_setValue('nv_my_posts', myPosts);
             GM_setValue('nv_fav_posts', favPosts);
-            GM_setValue('nv_settings', settings);
+            GM_setValue('nv_settings', 设置);
         },
         getCurrentUser() {
             const el = document.querySelector('.n-layout-header .n-button__content');
