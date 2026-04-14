@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Novelia 功能增强套件
 // @namespace    https://n.novelia.cc/
-// @version      1.7.0
-// @description  整合LightNovel搜索、书单助手、黑名单管理、简介自动排版。支持统一UI面板与模块化开关。
-// @author       Gemini&Claude
+// @version      2.1.0
+// @description  整合LightNovel搜索、书单助手、黑名单、简介排版、论坛发帖追踪与收藏。支持统一UI、模块化开关与本地数据导入导出。
+// @author       Gemini
 // @match        https://n.novelia.cc/*
 // @match        https://n.sakura-share.one/*
 // @match        https://lightnovel.jp/publicationdate/*
@@ -24,11 +24,12 @@
     const STORE_LISTS = 'novelia_book_lists_v2';
     const STORE_BLACKLIST = 'novelia_blacklist';
     const STORE_UI_POS = 'novelia_mega_ui_pos';
+    const STORE_FORUM_MY = 'nv_my_posts';
+    const STORE_FORUM_FAV = 'nv_fav_posts';
 
     const IS_NOVELIA = location.hostname.includes('novelia.cc') || location.hostname.includes('sakura-share.one');
     const IS_LIGHTNOVEL = location.hostname.includes('lightnovel.jp');
 
-    // 默认模版
     const DEFAULT_FIELDS_WEB = [
         { key: 'title_link', name: '书名链接 (### [日文](链接))', active: true, format: '### [{{jp_title}}]({{link}})' },
         { key: 'cn_title', name: '中文译名 (**中文名**：xxx)', active: true, format: '**中文名**：{{cn_title}}' },
@@ -36,7 +37,6 @@
         { key: 'tags', name: '标签 (**标签**：xxx)', active: true, format: '**标签**：{{tags}}' },
         { key: 'separator', name: '分割线 (---)', active: true, format: '\n---' }
     ];
-
     const DEFAULT_FIELDS_WENKU = [
         { key: 'title_link', name: '书名链接 (### [中文](链接))', active: true, format: '### [{{cn_title}}]({{link}})' },
         { key: 'separator', name: '分割线 (---)', active: true, format: '\n---' }
@@ -49,34 +49,42 @@
             enableBookList: true,
             enableBlacklist: true,
             enableFormatter: true,
+            enableForumManager: true,
             fields_web: DEFAULT_FIELDS_WEB,
             fields_wenku: DEFAULT_FIELDS_WENKU
         }),
         lists: GM_getValue(STORE_LISTS, { '默认书单': [] }),
         blacklist: getBlacklist(),
+        forumMyPosts: GM_getValue(STORE_FORUM_MY, {}),
+        forumFavPosts: GM_getValue(STORE_FORUM_FAV, {}),
         currentListId: '默认书单',
         extractData: [],
         selectedExtract: new Set(),
         selectedBlacklist: new Set(),
         panelOpen: false,
-        activeTab: 'tab-extract'
+        activeTab: 'tab-extract',
+        forumSearchMy: '', forumSortMy: 'timeDesc',
+        forumSearchFav: '', forumSortFav: 'timeDesc'
     };
 
-    // 补全缺失设置
     if (!megaState.settings.fields_web) megaState.settings.fields_web = DEFAULT_FIELDS_WEB;
     if (!megaState.settings.fields_wenku) megaState.settings.fields_wenku = DEFAULT_FIELDS_WENKU;
+    if (megaState.settings.enableForumManager === undefined) megaState.settings.enableForumManager = true;
 
     function saveSettings() { GM_setValue(STORE_SETTINGS, megaState.settings); }
     function saveLists() { GM_setValue(STORE_LISTS, megaState.lists); }
     function getBlacklist() { try { return JSON.parse(GM_getValue(STORE_BLACKLIST, '[]')); } catch { return []; } }
     function saveBlacklist(list) { GM_setValue(STORE_BLACKLIST, JSON.stringify(list)); megaState.blacklist = list; }
+    function saveForumData() {
+        GM_setValue(STORE_FORUM_MY, megaState.forumMyPosts);
+        GM_setValue(STORE_FORUM_FAV, megaState.forumFavPosts);
+    }
 
     // ============================================================
     // 统一 UI 与样式注入
     // ============================================================
     if (IS_NOVELIA) {
         GM_addStyle(`
-            /* 全局重置与基础变量 */
             :root {
                 --mega-primary: #63e2b7;
                 --mega-primary-hover: #7fe7c4;
@@ -84,56 +92,35 @@
                 --mega-danger: #e88080;
                 --mega-danger-hover: rgba(232,128,128,0.12);
             }
-
-            /* 悬浮触发按钮 (来自黑名单助手的拖拽球) */
-            #mega-trigger {
-                position: fixed; z-index: 99997; width: 44px; height: 44px; border-radius: 50%;
-                border: 1.5px solid rgba(99,226,183,0.5); background: var(--mega-primary-bg);
-                color: var(--mega-primary); font-size: 20px; cursor: grab;
-                display: flex; align-items: center; justify-content: center;
-                box-shadow: 0 2px 12px rgba(0,0,0,0.3); transition: background 0.2s, border-color 0.2s;
-                backdrop-filter: blur(4px); touch-action: none; user-select: none;
-            }
+            #mega-trigger { position: fixed; z-index: 99997; width: 44px; height: 44px; border-radius: 50%; border: 1.5px solid rgba(99,226,183,0.5); background: var(--mega-primary-bg); color: var(--mega-primary); font-size: 20px; cursor: grab; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 12px rgba(0,0,0,0.3); transition: background 0.2s, border-color 0.2s; backdrop-filter: blur(4px); touch-action: none; user-select: none; }
             #mega-trigger:hover { background: rgba(99,226,183,0.22); border-color: var(--mega-primary); }
             #mega-trigger.dragging { cursor: grabbing; box-shadow: 0 8px 28px rgba(0,0,0,0.5); transition: none; }
             #mega-trigger.snap-hint { border-color: var(--mega-primary); box-shadow: 0 0 0 4px rgba(99,226,183,0.25); }
 
-            /* 主控制面板 */
-            #mega-overlay {
-                position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 99998;
-                display: none; align-items: center; justify-content: center;
-            }
-            #mega-panel {
-                width: 850px; max-width: 95vw; height: 650px; max-height: 85vh;
-                border-radius: 8px; display: flex; flex-direction: column;
-                box-shadow: 0 10px 30px rgba(0,0,0,0.5); font-family: "PingFang SC", sans-serif;
-                font-size: 14px; overflow: hidden; transition: background-color 0.3s, color 0.3s;
-            }
+            #mega-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 99998; display: none; align-items: center; justify-content: center; }
+            #mega-panel { width: 950px; max-width: 95vw; height: 700px; max-height: 85vh; border-radius: 8px; display: flex; flex-direction: column; box-shadow: 0 10px 30px rgba(0,0,0,0.5); font-family: "PingFang SC", sans-serif; font-size: 14px; overflow: hidden; transition: background-color 0.3s, color 0.3s; }
 
-            /* 主题配色 (深色) */
             .mega-dark { background: #18181c; color: rgba(255,255,255,0.9); border: 1px solid #333; }
             .mega-dark .m-header { border-bottom: 1px solid #333; background: #202024; }
             .mega-dark .m-sidebar { border-right: 1px solid #333; background: #18181c; }
-            .mega-dark .m-item, .mega-dark .m-field-item { border-bottom: 1px solid #333; }
-            .mega-dark .m-item:hover { background: rgba(255,255,255,0.05); }
+            .mega-dark .m-item, .mega-dark .m-field-item, .mega-dark .m-table th, .mega-dark .m-table td { border-bottom: 1px solid #333; }
+            .mega-dark .m-item:hover, .mega-dark .m-table tbody tr:hover { background: rgba(255,255,255,0.05); }
             .mega-dark input[type="text"], .mega-dark textarea, .mega-dark select { background: #26262a; border: 1px solid #444; color: white; }
             .mega-dark .m-btn-default { border-color: rgba(255,255,255,0.24); color: rgba(255,255,255,0.82); }
             .mega-dark .m-btn-default:hover { border-color: var(--mega-primary); color: var(--mega-primary); }
 
-            /* 主题配色 (浅色) */
             .mega-light { background: #fff; color: #333; border: 1px solid #ccc; }
             .mega-light .m-header { border-bottom: 1px solid #eee; background: #f9f9f9; }
             .mega-light .m-sidebar { border-right: 1px solid #eee; background: #fff; }
-            .mega-light .m-item, .mega-light .m-field-item { border-bottom: 1px solid #eee; }
-            .mega-light .m-item:hover { background: #f5f5f5; }
+            .mega-light .m-item, .mega-light .m-field-item, .mega-light .m-table th, .mega-light .m-table td { border-bottom: 1px solid #eee; }
+            .mega-light .m-item:hover, .mega-light .m-table tbody tr:hover { background: #f5f5f5; }
             .mega-light input[type="text"], .mega-light textarea, .mega-light select { background: #fff; border: 1px solid #ccc; color: #333; }
             .mega-light .m-btn-default { border-color: rgba(0,0,0,0.2); color: #444; }
             .mega-light .m-btn-default:hover { border-color: #38b28a; color: #38b28a; }
 
-            /* 布局组件 */
             .m-header { height: 50px; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; font-weight: bold; font-size: 16px; flex-shrink: 0; }
             .m-body { flex: 1; display: flex; overflow: hidden; }
-            .m-sidebar { width: 140px; display: flex; flex-direction: column; padding: 10px 0; flex-shrink: 0; }
+            .m-sidebar { width: 140px; display: flex; flex-direction: column; padding: 10px 0; flex-shrink: 0; overflow-y: auto;}
             .m-content { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; }
 
             .m-tab-btn { padding: 12px 20px; cursor: pointer; transition: 0.2s; display: flex; align-items: center; gap: 8px; border-left: 3px solid transparent; }
@@ -141,34 +128,47 @@
             .m-tab-pane { display: none; flex-direction: column; height: 100%; }
             .m-tab-pane.active { display: flex; }
 
-            /* 通用按钮 */
             .m-btn { display: inline-flex; align-items: center; gap: 4px; padding: 0 12px; height: 28px; border-radius: 3px; border: 1px solid transparent; cursor: pointer; font-size: 13px; background: transparent; transition: 0.2s; white-space: nowrap; }
-            .m-btn:disabled { opacity: 0.5; cursor: not-allowed; }
             .m-btn-primary { background: var(--mega-primary-bg); border-color: var(--mega-primary) !important; color: var(--mega-primary) !important; }
             .m-btn-danger { border-color: rgba(232,128,128,0.5) !important; color: var(--mega-danger) !important; }
             .m-btn-danger:hover { background: var(--mega-danger-hover); border-color: var(--mega-danger) !important; }
+            .m-input { padding: 0 10px; height: 28px; border-radius: 3px; border: 1px solid; font-size: 13px; outline: none; }
 
-            /* 列表与表单元素 */
             .m-toolbar { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; flex-shrink: 0;}
             .m-list-container { flex: 1; overflow-y: auto; border: 1px solid rgba(128,128,128,0.2); border-radius: 4px; }
             .m-item { padding: 10px; display: flex; align-items: center; gap: 12px; cursor: pointer; }
             .m-item input[type="checkbox"] { transform: scale(1.2); cursor: pointer; accent-color: var(--mega-primary); }
+            textarea.m-editor { width: 96%; flex: 1; resize: none; padding: 15px; font-family: monospace; line-height: 1.6; outline: none; border-radius: 4px; }
 
-            textarea.m-editor { width: 95%; flex: 1; resize: none; padding: 15px; font-family: monospace; line-height: 1.6; outline: none; border-radius: 4px; }
+            .m-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+            .m-table th, .m-table td { padding: 10px 10px; text-align: left; vertical-align: middle; }
+            .m-table a { color: var(--mega-primary); text-decoration: none; transition: 0.2s; }
+            .m-table a:hover { opacity: 0.8; text-decoration: underline; }
+            .m-col-time, .m-col-stats, .m-col-action { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .m-table.fav-table .m-col-title { width: 57%; }
+            .m-table.fav-table .m-col-time { width: 15%; }
+            .m-table.fav-table .m-col-stats { width: 16%; }
+            .m-table.fav-table .m-col-action { width: 12%; text-align: center; }
+            .m-table.my-table .m-col-title { width: 69%; }
+            .m-table.my-table .m-col-time { width: 15%; }
+            .m-table.my-table .m-col-stats { width: 16%; }
 
-            /* 设置项 */
-            .m-setting-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; padding: 10px; border-radius: 6px; background: rgba(128,128,128,0.05); }
+            .m-title-wrap { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; white-space: normal; line-height: 1.5; font-weight: 500; }
+            .m-diff-up { color: #e88080; font-size: 12px; margin-left: 4px; font-weight: bold; }
+            .m-recent-update { color: #f2c97d; font-size: 11px; border: 1px solid #f2c97d; padding: 1px 4px; border-radius: 4px; margin-left: 8px; vertical-align: top; white-space: nowrap; }
+            .m-star-icon { display: inline-flex; align-items: center; color: #f2c97d; margin-right: 6px; }
+            .m-star-icon svg { width: 14px; height: 14px; }
+
+            .m-setting-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding: 10px; border-radius: 6px; background: rgba(128,128,128,0.05); }
             .m-switch { position: relative; width: 40px; height: 20px; background: #888; border-radius: 20px; cursor: pointer; transition: 0.3s; }
             .m-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: #fff; border-radius: 50%; transition: 0.3s; }
             .m-switch.active { background: var(--mega-primary); }
             .m-switch.active::after { left: 22px; }
 
-            /* 业务特征注入样式 (黑名单按钮等) */
             .nm-blacklist-btn { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; font-size: 11px; padding: 1px 7px; height: 20px; border-radius: 2px; border: 1px solid rgba(232, 128, 128, 0.5); color: #e88080; background: transparent; margin-right: 6px; transition: 0.2s; line-height: 1; white-space: nowrap; flex-shrink: 0; }
             .nm-blacklist-btn:hover { background: rgba(232, 128, 128, 0.15); border-color: #e88080; }
             .nm-blacklist-btn.detail { font-size: 13px; padding: 0 14px; height: 34px; border-radius: 34px; margin: 0 10px; }
 
-            /* Toast */
             .m-toast { position: fixed; bottom: 80px; right: 24px; padding: 10px 18px; border-radius: 4px; font-size: 13px; z-index: 99999; pointer-events: none; animation: m-toast-in 0.2s ease; }
             .m-toast-success { background: rgba(99,226,183,0.2); color: #63e2b7; border: 1px solid rgba(99,226,183,0.3); }
             @keyframes m-toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
@@ -186,23 +186,19 @@
     // ============================================================
     // 模块 1：LightNovel 搜索按钮
     // ============================================================
-    function cleanTitleText(text) {
-        let title = text.replace(/(\(|（|<|【|\[)[^)）>】\]]*?(\)|）|>|】|\])/g, '').replace(/[.,:;!?。，、！？\s\-・]+$/, '');
-        const romanPattern = "(?:(?:[XＸxｘ][CＣcｃ]|[XＸxｘ][LＬlｌ]|[LＬlｌ][XＸxｘ]{0,3}|[XＸxｘ]{1,3})(?:[IＩiｉ][XＸxｘ]|[IＩiｉ][VＶvｖ]|[VＶvｖ][IＩiｉ]{0,3}|[IＩiｉ]{1,3})?|(?:[IＩiｉ][XＸxｘ]|[IＩiｉ][VＶvｖ]|[VＶvｖ][IＩiｉ]{0,3}|[IＩiｉ]{1,3}))";
-        title = title.replace(new RegExp(`\\s*(?:LV|ep|sp|ex|extra|NO.|vol|volume)\\.?\\s*(?:\\d+|${romanPattern})`, 'gi'), '');
-        title = title.replace(/[\u2160-\u217F\u2460-\u2473\u3251-\u325F\u32B1-\u32BF]+/g, '');
-        const rRegex = new RegExp(`(?:(?:[XＸxｘ][CＣcｃ]|[XＸxｘ][LＬlｌ]|[LＬlｌ][XＸxｘ]{0,3}|[XＸxｘ]{1,3})(?:(?:[IＩiｉ][XＸxｘ]|[IＩiｉ][VＶvｖ]|[VＶvｖ][IＩiｉ]{0,3}|[IＩiｉ]{1,3}))?|(?:[IＩiｉ][XＸxｘ]|[IＩiｉ][VＶvｖ]|[VＶvｖ][IＩiｉ]{0,3}|[IＩiｉ]{1,3}))$`);
-        title = title.replace(rRegex, (m, offset, str) => (offset > 0 && /[a-zA-Zａ-ｚＡ-Ｚ]/.test(str.charAt(offset - 1))) ? m : '');
-        return title.replace(/\s+\d{1,3}$/, '').replace(/\s+0*\d+\s*$/, '').replace(/(\D+)\d+$/, '$1').replace(/[.,:;!?。，、！？\s\-・]+$/, '').trim();
-    }
-
     function initLightNovelSearch() {
         if (!megaState.settings.enableSearchBtn || !IS_LIGHTNOVEL) return;
 
-        GM_addStyle(`
-            .m-ln-btn { display: inline-block; margin-left: 8px; padding: 2px 8px; background-color: #FAEF8B; color: white; border-radius: 4px; text-decoration: none; font-size: 12px; cursor: pointer; border: none; transition: background 0.2s; }
-            .m-ln-btn:hover { background-color: #63E2B7; color: white; text-decoration: none; }
-        `);
+        GM_addStyle(`.m-ln-btn { display: inline-block; margin-left: 8px; padding: 2px 8px; background-color: #FAEF8B; color: white; border-radius: 4px; text-decoration: none; font-size: 12px; cursor: pointer; border: none; transition: background 0.2s; } .m-ln-btn:hover { background-color: #63E2B7; color: white; text-decoration: none; }`);
+
+        const cleanTitleText = (text) => {
+            let title = text.replace(/(\(|（|<|【|\[)[^)）>】\]]*?(\)|）|>|】|\])/g, '').replace(/[.,:;!?。，、！？\s\-・]+$/, '');
+            const rp = "(?:(?:[XＸxｘ][CＣcｃ]|[XＸxｘ][LＬlｌ]|[LＬlｌ][XＸxｘ]{0,3}|[XＸxｘ]{1,3})(?:[IＩiｉ][XＸxｘ]|[IＩiｉ][VＶvｖ]|[VＶvｖ][IＩiｉ]{0,3}|[IＩiｉ]{1,3})?|(?:[IＩiｉ][XＸxｘ]|[IＩiｉ][VＶvｖ]|[VＶvｖ][IＩiｉ]{0,3}|[IＩiｉ]{1,3}))";
+            title = title.replace(new RegExp(`\\s*(?:LV|ep|sp|ex|extra|NO.|vol|volume)\\.?\\s*(?:\\d+|${rp})`, 'gi'), '').replace(/[\u2160-\u217F\u2460-\u2473\u3251-\u325F\u32B1-\u32BF]+/g, '');
+            const rr = new RegExp(`(?:(?:[XＸxｘ][CＣcｃ]|[XＸxｘ][LＬlｌ]|[LＬlｌ][XＸxｘ]{0,3}|[XＸxｘ]{1,3})(?:(?:[IＩiｉ][XＸxｘ]|[IＩiｉ][VＶvｖ]|[VＶvｖ][IＩiｉ]{0,3}|[IＩiｉ]{1,3}))?|(?:[IＩiｉ][XＸxｘ]|[IＩiｉ][VＶvｖ]|[VＶvｖ][IＩiｉ]{0,3}|[IＩiｉ]{1,3}))$`);
+            title = title.replace(rr, (m, offset, str) => (offset > 0 && /[a-zA-Zａ-ｚＡ-Ｚ]/.test(str.charAt(offset - 1))) ? m : '');
+            return title.replace(/\s+\d{1,3}$/, '').replace(/\s+0*\d+\s*$/, '').replace(/(\D+)\d+$/, '$1').replace(/[.,:;!?。，、！？\s\-・]+$/, '').trim();
+        };
 
         const addSearchButtons = () => {
             document.querySelectorAll('td.title').forEach(td => {
@@ -214,7 +210,6 @@
                 btn.className = 'm-ln-btn';
                 btn.innerText = '🔍 Novelia';
                 btn.target = '_blank';
-                btn.title = `搜索: ${cleanName}`;
                 td.appendChild(btn);
             });
         };
@@ -231,7 +226,6 @@
     function initBlacklistDOM() {
         if (!megaState.settings.enableBlacklist || !IS_NOVELIA) return;
 
-        // 列表页处理
         const processList = () => {
             document.querySelectorAll('.n-list-item__main').forEach(item => {
                 if (item.dataset.megaBlProcessed) return;
@@ -270,13 +264,12 @@
             });
         };
 
-        // 详情页处理
         const processDetail = () => {
             const flexes = Array.from(document.querySelectorAll('.n-flex')).filter(f => {
                 const t = f.textContent; return (t.includes('开始阅读') || t.includes('继续阅读')) && (t.includes('收藏') || t.includes('编辑'));
             });
             if (flexes.length === 0) return;
-            const actionFlex = flexes[flexes.length - 1]; // 关键修复：获取最内层容器
+            const actionFlex = flexes[flexes.length - 1];
             if (actionFlex.dataset.megaBlProcessed) return;
             actionFlex.dataset.megaBlProcessed = '1';
 
@@ -320,8 +313,6 @@
     // 模块 3：文库简介自动排版
     // ============================================================
     function initFormatter() {
-        // 🌟 修复核心 1：入口处只检查开关状态，不再检查 URL
-        // 这样只要功能开启，无论在哪个页面都会启动监听器
         if (!megaState.settings.enableFormatter) return;
 
         const formatText = (text) => {
@@ -367,7 +358,6 @@
         };
 
         const inject = () => {
-            // 🌟 修复核心 2：将 URL 检查移动到注入逻辑内部
             if (!location.href.includes('/wenku-edit/')) return;
             if (document.getElementById('mega-format-btn')) return;
 
@@ -396,11 +386,200 @@
                 wrapper.appendChild(btn);
             }
         };
-
-        // 🌟 修复核心 3：无论在哪个页面，都立刻启动 Body 监听
-        // 当用户从详情页点击编辑时，Body 的变化会触发 inject 检查 URL 并完成注入
         new MutationObserver(inject).observe(document.body, { childList: true, subtree: true });
         inject();
+    }
+
+    // ============================================================
+    // 模块 4：论坛收藏与管理
+    // ============================================================
+    const fUtils = {
+        getPostId: (url) => { const m = url.match(/\/forum\/([a-f0-9]{24})/i); return m ? m[1] : null; },
+        getCurrentUser: () => { const el = document.querySelector('.n-layout-header .n-button__content'); return el && el.textContent.includes('@') ? el.textContent.replace('@', '').trim() : null; },
+        getTs: (post) => {
+            if (post.updateTimestamp) return post.updateTimestamp;
+            if (post.updateTime && typeof post.updateTime === 'string') {
+                let p = new Date(post.updateTime.replace(/-/g, '/')).getTime();
+                if (!isNaN(p)) return p;
+            }
+            return 0;
+        },
+        getRelTime: (ts) => {
+            if (!ts) return '未知';
+            const mins = Math.floor((Date.now() - ts) / 60000);
+            const hrs = Math.floor(mins / 60), days = Math.floor(hrs / 24);
+            if (mins < 1) return '刚刚'; if (hrs < 1) return `${mins} 分钟前`;
+            if (days < 1) return `${hrs} 小时前`; if (days < 30) return `${days} 天前`;
+            if (days < 365) return `${Math.floor(days / 30)} 个月前`; return `${Math.floor(days / 365)} 年前`;
+        },
+        fetchPost: async (id) => {
+            try {
+                const res = await fetch(`/api/article/${id}`);
+                if (res.status === 404) return { deleted: true };
+                const data = await res.json();
+                let ts = data.updateAt ? parseInt(data.updateAt) : null;
+                if (ts && ts < 10000000000) ts *= 1000;
+                return { deleted: false, views: data.numViews !== undefined ? parseInt(data.numViews) : null, replies: data.numComments !== undefined ? parseInt(data.numComments) : null, updateTimestamp: ts, author: data.user?.username };
+            } catch (e) { return null; }
+        }
+    };
+
+    function initForumManager() {
+        if (!megaState.settings.enableForumManager || !IS_NOVELIA) return;
+
+        const SVG_FAV = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2L9.19 8.63L2 9.24l5.46 4.73L5.82 21z" fill="currentColor"></path></svg>`;
+
+        const injectStarToList = () => {
+            document.querySelectorAll('table.n-table tbody tr').forEach(row => {
+                const linkEl = row.querySelector('a.n-a');
+                if (!linkEl) return;
+                const id = fUtils.getPostId(linkEl.href);
+                const flexContainer = row.querySelector('div.n-flex');
+                if (flexContainer && (megaState.forumMyPosts[id] || megaState.forumFavPosts[id])) {
+                    if (!flexContainer.querySelector('.m-star-icon')) {
+                        const star = document.createElement('span');
+                        star.className = 'n-text __text-dark-131ezvy-w m-star-icon';
+                        star.innerHTML = SVG_FAV;
+                        flexContainer.insertBefore(star, flexContainer.firstChild);
+                    }
+                } else if (flexContainer && !megaState.forumMyPosts[id] && !megaState.forumFavPosts[id]) {
+                    const existingStar = flexContainer.querySelector('.m-star-icon');
+                    if (existingStar) existingStar.remove();
+                }
+            });
+        };
+
+        const autoCaptureMyPosts = () => {
+            const user = fUtils.getCurrentUser();
+            if (!user) return;
+            document.querySelectorAll('table.n-table tbody tr').forEach(row => {
+                const authorSpan = row.querySelector('span.n-text');
+                if (authorSpan && authorSpan.textContent.includes(`by ${user}`)) {
+                    const linkEl = row.querySelector('a.n-a');
+                    if (!linkEl) return;
+                    const id = fUtils.getPostId(linkEl.href);
+                    if (id) {
+                        const nums = row.querySelector('.article-number')?.textContent || "0/0";
+                        const [views, replies] = nums.split('/').map(n => parseInt(n) || 0);
+                        if (!megaState.forumMyPosts[id]) {
+                            megaState.forumMyPosts[id] = { id, title: linkEl.textContent.trim(), url: linkEl.href, views, replies, updateTimestamp: Date.now(), newViews: 0, newReplies: 0 };
+                            saveForumData();
+                        } else {
+                            if(views > megaState.forumMyPosts[id].views || replies > megaState.forumMyPosts[id].replies) {
+                               megaState.forumMyPosts[id].views = Math.max(views, megaState.forumMyPosts[id].views);
+                               megaState.forumMyPosts[id].replies = Math.max(replies, megaState.forumMyPosts[id].replies);
+                               saveForumData();
+                            }
+                        }
+                    }
+                }
+            });
+        };
+
+        const injectDetailFavoriteBtn = () => {
+            const postId = fUtils.getPostId(location.href);
+            if (!postId || !location.href.includes('/forum/6')) return;
+
+            const btns = Array.from(document.querySelectorAll('.n-button__content'));
+            const blockBtn = btns.find(b => b.textContent.includes('屏蔽'));
+            if (blockBtn && !document.getElementById('m-detail-fav-btn')) {
+                const isFav = megaState.forumFavPosts[postId] !== undefined;
+                const favBtn = document.createElement('button');
+                favBtn.id = 'm-detail-fav-btn';
+                favBtn.className = 'm-btn m-btn-default nm-blacklist-btn detail';
+                favBtn.innerHTML = isFav ? '❌ 取消收藏' : '⭐ 收藏';
+                favBtn.onclick = () => {
+                    if (megaState.forumFavPosts[postId]) {
+                        delete megaState.forumFavPosts[postId];
+                        favBtn.innerHTML = '⭐ 收藏';
+                    } else {
+                        const titleEl = document.querySelector('h1.n-h1');
+                        megaState.forumFavPosts[postId] = { id: postId, title: titleEl ? titleEl.textContent : '已收藏帖子', url: location.href, views: 0, replies: 0, updateTimestamp: Date.now(), newViews: 0, newReplies: 0 };
+                        favBtn.innerHTML = '❌ 取消收藏';
+                    }
+                    saveForumData();
+                    if(megaState.panelOpen && megaState.activeTab === 'tab-forum-fav') renderForumFav();
+                };
+                blockBtn.closest('button').insertAdjacentElement('afterend', favBtn);
+            }
+        };
+
+        const router = () => {
+            if (location.href.includes('/forum') && !location.href.includes('/forum/6')) {
+                autoCaptureMyPosts(); injectStarToList();
+            } else if (location.href.includes('/forum/6')) {
+                injectDetailFavoriteBtn();
+            }
+        };
+        new MutationObserver(() => setTimeout(router, 300)).observe(document.body, { childList: true, subtree: true });
+        router();
+    }
+
+    // --- 论坛面板渲染逻辑 (与 UI 绑定) ---
+    function sortPosts(list, sortBy) {
+        return list.sort((a, b) => {
+            const tsA = fUtils.getTs(a), tsB = fUtils.getTs(b);
+            if (sortBy === 'timeDesc') return tsB - tsA; if (sortBy === 'timeAsc') return tsA - tsB;
+            if (sortBy === 'titleAsc') return a.title.localeCompare(b.title, 'zh');
+            if (sortBy === 'titleDesc') return b.title.localeCompare(a.title, 'zh');
+            return 0;
+        });
+    }
+
+    function renderForumRowHTML(post, isFav) {
+        let diffViews = post.newViews ? `<span class="m-diff-up">+${post.newViews}</span>` : '';
+        let diffReplies = post.newReplies ? `<span class="m-diff-up">+${post.newReplies}</span>` : '';
+        let ts = fUtils.getTs(post);
+        let recentMark = (isFav && ts && (Date.now() - ts) < 86400000) ? `<span class="m-recent-update">24h内更新</span>` : '';
+        let actionTd = isFav ? `<td class="m-col-action"><button class="m-btn m-btn-danger" onclick="window.removeForumPost('${post.id}', 'fav')">移除</button></td>` : '';
+
+        return `<tr>
+            <td class="m-col-title"><div class="m-title-wrap"><a href="/forum/${post.id}" target="_blank">${post.title}</a> ${recentMark}</div></td>
+            <td class="m-col-time" title="${fUtils.getRelTime(ts)}">${fUtils.getRelTime(ts)}</td>
+            <td class="m-col-stats">${post.views || 0}${diffViews} / ${post.replies || 0}${diffReplies}</td>
+            ${actionTd}
+        </tr>`;
+    }
+
+    window.removeForumPost = function(id, type) {
+        if (type === 'my') delete megaState.forumMyPosts[id]; else delete megaState.forumFavPosts[id];
+        saveForumData();
+        if (type === 'my') renderForumMy(); else renderForumFav();
+    };
+
+    function renderForumMy() {
+        let list = Object.values(megaState.forumMyPosts);
+        if (megaState.forumSearchMy) list = list.filter(p => p.title.toLowerCase().includes(megaState.forumSearchMy.toLowerCase()));
+        document.getElementById('list-forum-my-tbody').innerHTML = sortPosts(list, megaState.forumSortMy).map(p => renderForumRowHTML(p, false)).join('');
+    }
+    function renderForumFav() {
+        let list = Object.values(megaState.forumFavPosts);
+        if (megaState.forumSearchFav) list = list.filter(p => p.title.toLowerCase().includes(megaState.forumSearchFav.toLowerCase()));
+        document.getElementById('list-forum-fav-tbody').innerHTML = sortPosts(list, megaState.forumSortFav).map(p => renderForumRowHTML(p, true)).join('');
+    }
+
+    async function syncForumData(type) {
+        const isMy = type === 'my';
+        const dict = isMy ? megaState.forumMyPosts : megaState.forumFavPosts;
+        const statusEl = document.getElementById(isMy ? 'm-forum-my-status' : 'm-forum-fav-status');
+        let ids = Object.keys(dict);
+        if (!ids.length) return;
+
+        statusEl.textContent = "同步中...";
+        for (let id of ids) {
+            let post = dict[id];
+            let apiData = await fUtils.fetchPost(id);
+            if (apiData) {
+                if (apiData.deleted) { delete dict[id]; continue; }
+                if (apiData.views !== null) { post.newViews = Math.max(0, apiData.views - (post.views || 0)); post.views = apiData.views; }
+                if (apiData.replies !== null) { post.newReplies = Math.max(0, apiData.replies - (post.replies || 0)); post.replies = apiData.replies; }
+                if (apiData.updateTimestamp) post.updateTimestamp = apiData.updateTimestamp;
+            }
+            if(isMy) renderForumMy(); else renderForumFav();
+            await new Promise(r => setTimeout(r, 1500));
+        }
+        saveForumData();
+        statusEl.textContent = `同步完成 (${ids.length}条)`;
     }
 
     // ============================================================
@@ -409,7 +588,6 @@
     function initMegaUI() {
         if (!IS_NOVELIA) return;
 
-        // --- 悬浮按钮 (带拖拽) ---
         const btn = document.createElement('div');
         btn.id = 'mega-trigger';
         btn.innerHTML = `📚`;
@@ -447,12 +625,9 @@
                 applyPos(snapX, c.y);
                 setTimeout(() => { btn.style.transition = ''; }, 280);
                 GM_setValue(STORE_UI_POS, { x: snapX, y: c.y });
-            } else {
-                togglePanel();
-            }
+            } else { togglePanel(); }
         };
 
-        // --- 主面板结构 ---
         const overlay = document.createElement('div');
         overlay.id = 'mega-overlay';
         overlay.innerHTML = `
@@ -465,7 +640,9 @@
                     <div class="m-sidebar">
                         <div class="m-tab-btn active" data-tab="tab-extract">🔍 抓取书籍</div>
                         <div class="m-tab-btn" data-tab="tab-list">📝 书单管理</div>
-                        <div class="m-tab-btn" data-tab="tab-blacklist">🚫 黑名单</div>
+                        <div class="m-tab-btn" data-tab="tab-blacklist">🚫 小说黑名单</div>
+                        <div class="m-tab-btn" data-tab="tab-forum-my">🗣️ 我的发帖</div>
+                        <div class="m-tab-btn" data-tab="tab-forum-fav">⭐ 论坛收藏</div>
                         <div class="m-tab-btn" data-tab="tab-settings">⚙️ 全局设置</div>
                     </div>
                     <div class="m-content">
@@ -503,14 +680,61 @@
                             <div class="m-list-container" id="list-blacklist" style="display:flex; flex-direction:column; gap:4px; padding:10px;"></div>
                         </div>
 
+                        <div class="m-tab-pane" id="tab-forum-my">
+                            <div class="m-toolbar">
+                                <input type="text" id="m-search-forum-my" class="m-input" placeholder="搜索标题..." style="flex:1; max-width:250px;">
+                                <select id="m-sort-forum-my" class="m-input">
+                                    <option value="timeDesc">更新时间 (新到旧)</option><option value="timeAsc">更新时间 (旧到新)</option>
+                                    <option value="titleAsc">标题名称 (A到Z)</option><option value="titleDesc">标题名称 (Z到A)</option>
+                                </select>
+                                <div style="flex:1"></div>
+                                <button class="m-btn m-btn-default" id="m-btn-import-mine">导入我的帖子</button>
+                                <span id="m-forum-my-status" style="font-size:12px; opacity:0.7; min-width:100px; text-align:right;"></span>
+                            </div>
+                            <div class="m-list-container">
+                                <table class="m-table my-table">
+                                    <thead><tr><th class="m-col-title">标题</th><th class="m-col-time">更新时间</th><th class="m-col-stats">查看/回复</th></tr></thead>
+                                    <tbody id="list-forum-my-tbody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="m-tab-pane" id="tab-forum-fav">
+                            <div class="m-toolbar">
+                                <input type="text" id="m-search-forum-fav" class="m-input" placeholder="搜索标题..." style="flex:1; max-width:250px;">
+                                <select id="m-sort-forum-fav" class="m-input">
+                                    <option value="timeDesc">更新时间 (新到旧)</option><option value="timeAsc">更新时间 (旧到新)</option>
+                                    <option value="titleAsc">标题名称 (A到Z)</option><option value="titleDesc">标题名称 (Z到A)</option>
+                                </select>
+                                <div style="flex:1"></div>
+                                <button class="m-btn m-btn-default" id="m-btn-import-fav">链接收藏帖子</button>
+                                <span id="m-forum-fav-status" style="font-size:12px; opacity:0.7; min-width:100px; text-align:right;"></span>
+                            </div>
+                            <div class="m-list-container">
+                                <table class="m-table fav-table">
+                                    <thead><tr><th class="m-col-title">标题</th><th class="m-col-time">更新时间</th><th class="m-col-stats">查看/回复</th><th class="m-col-action">操作</th></tr></thead>
+                                    <tbody id="list-forum-fav-tbody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+
                         <div class="m-tab-pane" id="tab-settings">
                             <h3 style="margin-top:0;">模块开关 (全局生效)</h3>
                             <div class="m-setting-row"><span>启用 LightNovel.jp 搜索按钮跳转</span><div class="m-switch" data-key="enableSearchBtn"></div></div>
-                            <div class="m-setting-row"><span>启用 书单抓取与制作助手 (本面板功能)</span><div class="m-switch" data-key="enableBookList"></div></div>
-                            <div class="m-setting-row"><span>启用 小说黑名单隐藏机制</span><div class="m-switch" data-key="enableBlacklist"></div></div>
+                            <div class="m-setting-row"><span>启用 书单抓取与制作助手</span><div class="m-switch" data-key="enableBookList"></div></div>
+                            <div class="m-setting-row"><span>启用 小说搜索列表黑名单隐藏机制</span><div class="m-switch" data-key="enableBlacklist"></div></div>
                             <div class="m-setting-row"><span>启用 文库编辑页简介自动排版</span><div class="m-switch" data-key="enableFormatter"></div></div>
+                            <div class="m-setting-row"><span>启用 论坛发帖追踪与收藏管理</span><div class="m-switch" data-key="enableForumManager"></div></div>
 
-                            <h3>界面设置</h3>
+                            <h3 style="margin-top:20px;">数据备份与恢复</h3>
+                            <div style="display:flex; gap:15px; margin-bottom: 12px;">
+                                <button class="m-btn m-btn-default m-btn-primary" id="btn-export-all">⬇️ 导出全部数据</button>
+                                <button class="m-btn m-btn-default" id="btn-import-all">⬆️ 从本地导入</button>
+                                <input type="file" id="file-import-all" accept=".json" style="display:none">
+                            </div>
+                            <div style="font-size:12px; opacity:0.6; line-height:1.5;">* 包含全局设置、书单、小说黑名单以及论坛的收藏和发帖记录。建议定期备份以防数据丢失。</div>
+
+                            <h3 style="margin-top:20px;">界面设置</h3>
                             <div class="m-setting-row">
                                 <span>面板主题</span>
                                 <select id="sel-theme" class="m-btn m-btn-default">
@@ -524,7 +748,6 @@
         `;
         document.body.appendChild(overlay);
 
-        // --- UI 事件绑定与主题控制 ---
         document.getElementById('m-close').onclick = () => togglePanel();
         overlay.onclick = (e) => { if(e.target === overlay) togglePanel(); };
 
@@ -543,12 +766,10 @@
             megaState.panelOpen = !megaState.panelOpen;
             overlay.style.display = megaState.panelOpen ? 'flex' : 'none';
             if (megaState.panelOpen) {
-                updateTheme();
-                renderTabs();
+                updateTheme(); renderTabs();
             }
         };
 
-        // Tab 切换逻辑
         document.querySelectorAll('.m-tab-btn').forEach(btn => {
             btn.onclick = () => {
                 document.querySelectorAll('.m-tab-btn').forEach(b => b.classList.remove('active'));
@@ -560,76 +781,26 @@
             };
         });
 
-        // 定时检查主题变化
         setInterval(() => { if (megaState.panelOpen && megaState.settings.theme === 'auto') updateTheme(); }, 2000);
 
-        initExtractTab();
-        initListTab();
-        initBlacklistTab();
-        initSettingsTab();
-    }
-
-    // --- 书籍提取逻辑 ---
-    function performExtraction() {
-        const url = window.location.href;
-        const isWenku = url.includes('/wenku') || url.includes('/favorite/wenku');
-        let items = [];
-
-        if (url.includes('/novel') || url.includes('/favorite/web') || url.includes('/read-history')) {
-            document.querySelectorAll('.n-list-item').forEach(el => {
-                const mainDiv = el.querySelector('.n-list-item__main > div');
-                if (!mainDiv) return;
-                const a = mainDiv.querySelector('a:first-child');
-                const cnNode = mainDiv.querySelector('span.n-text.__text-dark-131ezvy-d');
-                let status = "未知", chapters = "未知";
-                for (let s of mainDiv.querySelectorAll('span')) {
-                    if (s.textContent.includes('连载中')) status = '连载中';
-                    else if (s.textContent.includes('已完结')) status = '已完结';
-                    const chapMatch = s.textContent.match(/总计\s*(\d+)/);
-                    if (chapMatch) chapters = chapMatch[1];
-                }
-                items.push({
-                    type: 'web', jp_title: a ? a.innerText.trim() : '',
-                    cn_title: cnNode ? cnNode.innerText.trim() : (a ? a.innerText.trim() : ''),
-                    link: a ? a.href : '', status, chapters, tags: []
-                });
-            });
-        } else if (isWenku) {
-            document.querySelectorAll('.n-grid > div').forEach(el => {
-                const linkEl = el.querySelector('a');
-                if (!linkEl) return;
-                const titleDiv = el.querySelector('.n-text.text-2line');
-                items.push({ type: 'wenku', cn_title: titleDiv ? titleDiv.innerText.replace(/[\n\r]+|[\s]{2,}/g, ' ').trim() : '未命名', link: linkEl.href, jp_title: '', tags: [], status: '文库', chapters: 'N/A' });
-            });
-        }
-        return items;
+        initExtractTab(); initListTab(); initBlacklistTab(); initSettingsTab(); initForumUIEvents();
     }
 
     function initExtractTab() {
-        document.getElementById('btn-scan').onclick = () => {
-            document.getElementById('list-extract').innerHTML = '<div style="padding:40px;text-align:center;">⏳ 正在重新扫描...</div>';
-            setTimeout(() => { megaState.extractData = performExtraction(); megaState.selectedExtract.clear(); renderExtractList(); }, 50);
-        };
+        document.getElementById('btn-scan').onclick = () => { document.getElementById('list-extract').innerHTML = '<div style="padding:40px;text-align:center;">⏳ 正在重新扫描...</div>'; setTimeout(() => { megaState.extractData = performExtraction(); megaState.selectedExtract.clear(); renderExtractList(); }, 50); };
         document.getElementById('btn-sel-all').onclick = () => { megaState.extractData.forEach((_, i) => megaState.selectedExtract.add(i)); renderExtractList(); };
-        document.getElementById('btn-sel-inv').onclick = () => {
-            const newSet = new Set();
-            megaState.extractData.forEach((_, i) => { if (!megaState.selectedExtract.has(i)) newSet.add(i); });
-            megaState.selectedExtract = newSet; renderExtractList();
-        };
+        document.getElementById('btn-sel-inv').onclick = () => { const newSet = new Set(); megaState.extractData.forEach((_, i) => { if (!megaState.selectedExtract.has(i)) newSet.add(i); }); megaState.selectedExtract = newSet; renderExtractList(); };
         document.getElementById('btn-add-list').onclick = () => {
             const target = document.getElementById('sel-target-list').value;
             if (!target) return alert('请先创建书单');
             const list = megaState.lists[target] || [];
             const fields = megaState.extractData.some(b => b.type === 'wenku') ? megaState.settings.fields_wenku : megaState.settings.fields_web;
-
             megaState.selectedExtract.forEach(idx => {
                 const b = megaState.extractData[idx];
                 let text = fields.filter(f => f.active).map(f => f.format.replace(/{{jp_title}}/g, b.jp_title||b.cn_title||'').replace(/{{cn_title}}/g, b.cn_title||b.jp_title).replace(/{{link}}/g, b.link||'').replace(/{{status}}/g, b.status||'').replace(/{{chapters}}/g, b.chapters||'')).join('\n');
                 list.push(text + '\n');
             });
-            megaState.lists[target] = list; saveLists();
-            megaState.selectedExtract.clear(); renderExtractList();
-            showToast(`已添加至 ${target}`);
+            megaState.lists[target] = list; saveLists(); megaState.selectedExtract.clear(); renderExtractList(); showToast(`已添加至 ${target}`);
         };
     }
 
@@ -637,69 +808,37 @@
         const c = document.getElementById('list-extract');
         c.innerHTML = megaState.extractData.length ? '' : '<div style="padding:40px;text-align:center;opacity:0.6;">当前页面未检测到有效书籍</div>';
         megaState.extractData.forEach((book, i) => {
-            const div = document.createElement('div');
-            div.className = 'm-item';
+            const div = document.createElement('div'); div.className = 'm-item';
             div.innerHTML = `<input type="checkbox" ${megaState.selectedExtract.has(i) ? 'checked' : ''}><div style="flex:1"><div style="font-weight:bold;">${book.cn_title}</div><div style="font-size:12px;opacity:0.7;">${book.status} · ${book.chapters}</div></div>`;
-            div.onclick = (e) => {
-                if (e.target.tagName !== 'INPUT') div.querySelector('input').checked = !div.querySelector('input').checked;
-                div.querySelector('input').checked ? megaState.selectedExtract.add(i) : megaState.selectedExtract.delete(i);
-            };
+            div.onclick = (e) => { if (e.target.tagName !== 'INPUT') div.querySelector('input').checked = !div.querySelector('input').checked; div.querySelector('input').checked ? megaState.selectedExtract.add(i) : megaState.selectedExtract.delete(i); };
             c.appendChild(div);
         });
-
-        const sel = document.getElementById('sel-target-list');
-        sel.innerHTML = '';
+        const sel = document.getElementById('sel-target-list'); sel.innerHTML = '';
         Object.keys(megaState.lists).forEach(k => sel.appendChild(new Option(k, k, false, k === megaState.currentListId)));
     }
 
-    // --- 书单管理逻辑 ---
     function initListTab() {
         const sel = document.getElementById('sel-manage-list'), ed = document.getElementById('editor-list');
-        const updateEditor = () => { megaState.currentListId = sel.value; ed.value = (megaState.lists[sel.value] || []).join('\n'); };
-        sel.onchange = updateEditor;
+        sel.onchange = () => { megaState.currentListId = sel.value; ed.value = (megaState.lists[sel.value] || []).join('\n'); };
         ed.oninput = () => { megaState.lists[megaState.currentListId] = [ed.value]; saveLists(); };
-
-        document.getElementById('btn-new-list').onclick = () => {
-            const n = prompt("新书单名称：");
-            if (n && !megaState.lists[n]) { megaState.lists[n] = []; megaState.currentListId = n; saveLists(); renderListTabUI(); }
-        };
-        document.getElementById('btn-del-list').onclick = () => {
-            if (confirm(`删除 "${megaState.currentListId}"？`)) {
-                delete megaState.lists[megaState.currentListId];
-                megaState.currentListId = Object.keys(megaState.lists)[0] || '';
-                saveLists(); renderListTabUI();
-            }
-        };
+        document.getElementById('btn-new-list').onclick = () => { const n = prompt("新书单名称："); if (n && !megaState.lists[n]) { megaState.lists[n] = []; megaState.currentListId = n; saveLists(); renderListTabUI(); } };
+        document.getElementById('btn-del-list').onclick = () => { if (confirm(`删除 "${megaState.currentListId}"？`)) { delete megaState.lists[megaState.currentListId]; megaState.currentListId = Object.keys(megaState.lists)[0] || ''; saveLists(); renderListTabUI(); } };
         document.getElementById('btn-copy-list').onclick = () => { GM_setClipboard(ed.value); showToast('已复制'); };
     }
 
     function renderListTabUI() {
-        const sel = document.getElementById('sel-manage-list');
-        sel.innerHTML = '';
+        const sel = document.getElementById('sel-manage-list'); sel.innerHTML = '';
         Object.keys(megaState.lists).forEach(k => sel.appendChild(new Option(k, k, false, k === megaState.currentListId)));
         document.getElementById('editor-list').value = (megaState.lists[megaState.currentListId] || []).join('\n');
     }
 
-    // --- 黑名单逻辑 ---
     function initBlacklistTab() {
-        document.getElementById('bl-sel-all').onclick = () => {
-            const all = megaState.selectedBlacklist.size === megaState.blacklist.length;
-            megaState.selectedBlacklist = all ? new Set() : new Set(megaState.blacklist.map(x => x.url));
-            renderBlacklistTab();
-        };
-        document.getElementById('bl-sel-inv').onclick = () => {
-            const newSet = new Set();
-            megaState.blacklist.forEach(x => { if (!megaState.selectedBlacklist.has(x.url)) newSet.add(x.url); });
-            megaState.selectedBlacklist = newSet; renderBlacklistTab();
-        };
+        document.getElementById('bl-sel-all').onclick = () => { megaState.selectedBlacklist = megaState.selectedBlacklist.size === megaState.blacklist.length ? new Set() : new Set(megaState.blacklist.map(x => x.url)); renderBlacklistTab(); };
+        document.getElementById('bl-sel-inv').onclick = () => { const newSet = new Set(); megaState.blacklist.forEach(x => { if (!megaState.selectedBlacklist.has(x.url)) newSet.add(x.url); }); megaState.selectedBlacklist = newSet; renderBlacklistTab(); };
         document.getElementById('bl-del').onclick = () => {
             if (!megaState.selectedBlacklist.size) return;
-            const newList = megaState.blacklist.filter(x => !megaState.selectedBlacklist.has(x.url));
-            saveBlacklist(newList);
-            megaState.selectedBlacklist.clear();
-            renderBlacklistTab();
-            showToast('已删除选中黑名单');
-            // 触发页面元素重新过滤
+            saveBlacklist(megaState.blacklist.filter(x => !megaState.selectedBlacklist.has(x.url)));
+            megaState.selectedBlacklist.clear(); renderBlacklistTab(); showToast('已删除选中黑名单');
             document.querySelectorAll('.n-list-item__main').forEach(i => delete i.dataset.megaBlProcessed);
         };
     }
@@ -708,25 +847,46 @@
         document.getElementById('bl-count').textContent = `共 ${megaState.blacklist.length} 条记录`;
         const c = document.getElementById('list-blacklist');
         c.innerHTML = megaState.blacklist.length ? '' : '<div style="padding:40px;text-align:center;opacity:0.6;">黑名单为空</div>';
-
         megaState.blacklist.forEach(item => {
-            const row = document.createElement('div');
-            row.style.cssText = 'display:flex; align-items:center; gap:10px; padding:6px 10px; border-radius:4px; transition:0.2s;';
-            row.className = 'm-item';
-            row.innerHTML = `
-                <input type="checkbox" ${megaState.selectedBlacklist.has(item.url) ? 'checked' : ''}>
-                <div style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.title || '无标题'}</div>
-                <div style="font-size:11px; opacity:0.5; max-width:200px; overflow:hidden; text-overflow:ellipsis;">${item.url}</div>
-            `;
-            row.onclick = (e) => {
-                if (e.target.tagName !== 'INPUT') row.querySelector('input').checked = !row.querySelector('input').checked;
-                row.querySelector('input').checked ? megaState.selectedBlacklist.add(item.url) : megaState.selectedBlacklist.delete(item.url);
-            };
+            const row = document.createElement('div'); row.style.cssText = 'display:flex; align-items:center; gap:10px; padding:6px 10px; border-radius:4px; transition:0.2s;'; row.className = 'm-item';
+            row.innerHTML = `<input type="checkbox" ${megaState.selectedBlacklist.has(item.url) ? 'checked' : ''}><div style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.title || '无标题'}</div><div style="font-size:11px; opacity:0.5; max-width:200px; overflow:hidden; text-overflow:ellipsis;">${item.url}</div>`;
+            row.onclick = (e) => { if (e.target.tagName !== 'INPUT') row.querySelector('input').checked = !row.querySelector('input').checked; row.querySelector('input').checked ? megaState.selectedBlacklist.add(item.url) : megaState.selectedBlacklist.delete(item.url); };
             c.appendChild(row);
         });
     }
 
-    // --- 设置逻辑 ---
+    function initForumUIEvents() {
+        document.getElementById('m-search-forum-my').addEventListener('input', (e) => { megaState.forumSearchMy = e.target.value; renderForumMy(); });
+        document.getElementById('m-sort-forum-my').addEventListener('change', (e) => { megaState.forumSortMy = e.target.value; renderForumMy(); });
+        document.getElementById('m-search-forum-fav').addEventListener('input', (e) => { megaState.forumSearchFav = e.target.value; renderForumFav(); });
+        document.getElementById('m-sort-forum-fav').addEventListener('change', (e) => { megaState.forumSortFav = e.target.value; renderForumFav(); });
+
+        document.getElementById('m-btn-import-mine').onclick = async () => {
+            const url = prompt("请输入你的帖子链接:"); if (!url) return;
+            const id = url.match(/\/forum\/([a-f0-9]{24})/i)?.[1]; if (!id) return alert("无效链接！");
+            const apiData = await fetch(`/api/article/${id}`).then(r => r.json()).catch(() => null);
+            const user = document.querySelector('.n-layout-header .n-button__content')?.textContent.replace('@', '').trim();
+
+            if (apiData && apiData.user?.username === user) {
+                megaState.forumMyPosts[id] = { id, url, title: "手动导入的帖子", views: parseInt(apiData.numViews)||0, replies: parseInt(apiData.numComments)||0, updateTimestamp: apiData.updateAt?(parseInt(apiData.updateAt)* (apiData.updateAt<10000000000?1000:1)):Date.now() };
+                saveForumData(); showToast("添加至发帖记录！"); syncForumData('my');
+            } else {
+                alert("验证失败：该帖子作者不是你当前登录账号，已自动转移至收藏列表。");
+                megaState.forumFavPosts[id] = { id, url, title: "手动导入的帖子", views: parseInt(apiData?.numViews)||0, replies: parseInt(apiData?.numComments)||0, updateTimestamp: apiData?.updateAt?(parseInt(apiData.updateAt)* (apiData.updateAt<10000000000?1000:1)):Date.now() };
+                saveForumData(); syncForumData('fav');
+            }
+        };
+
+        document.getElementById('m-btn-import-fav').onclick = () => {
+            const url = prompt("请输入你想收藏的帖子链接:"); if (!url) return;
+            const id = url.match(/\/forum\/([a-f0-9]{24})/i)?.[1]; if (!id) return alert("无效链接！");
+            if(!megaState.forumFavPosts[id]) {
+                megaState.forumFavPosts[id] = { id, url, title: "导入的收藏(将在刷新时更新)", views: 0, replies: 0, updateTimestamp: Date.now() };
+                saveForumData(); showToast("已加入收藏！"); syncForumData('fav');
+            } else { alert("该帖子已在收藏中。"); }
+        };
+    }
+
     function initSettingsTab() {
         document.querySelectorAll('.m-switch').forEach(sw => {
             const key = sw.dataset.key;
@@ -734,46 +894,75 @@
             sw.onclick = () => {
                 megaState.settings[key] = !megaState.settings[key];
                 sw.classList.toggle('active', megaState.settings[key]);
-                saveSettings();
-                showToast('设置已保存，刷新页面后生效');
+                saveSettings(); showToast('设置已保存，刷新页面后生效');
             };
         });
-
         const selTheme = document.getElementById('sel-theme');
         selTheme.value = megaState.settings.theme;
         selTheme.onchange = () => {
-            megaState.settings.theme = selTheme.value;
-            saveSettings();
-            // 立即触发主题更新
-            const p = document.getElementById('mega-panel');
-            p.className = selTheme.value === 'dark' ? 'mega-dark' : 'mega-light';
+            megaState.settings.theme = selTheme.value; saveSettings();
+            document.getElementById('mega-panel').className = selTheme.value === 'dark' ? 'mega-dark' : 'mega-light';
+        };
+
+        // --- 新增：导出功能 ---
+        document.getElementById('btn-export-all').onclick = () => {
+            const dataToExport = {
+                settings: megaState.settings,
+                lists: megaState.lists,
+                blacklist: megaState.blacklist,
+                forumMyPosts: megaState.forumMyPosts,
+                forumFavPosts: megaState.forumFavPosts
+            };
+            const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `novelia_megapack_backup_${new Date().toISOString().slice(0, 10)}.json`;
+            a.click();
+            showToast('数据导出成功！');
+        };
+
+        // --- 新增：导入功能 ---
+        document.getElementById('btn-import-all').onclick = () => {
+            document.getElementById('file-import-all').click();
+        };
+
+        document.getElementById('file-import-all').onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                try {
+                    const data = JSON.parse(ev.target.result);
+                    // 验证并合并数据
+                    if (data.settings) megaState.settings = data.settings;
+                    if (data.lists) megaState.lists = data.lists;
+                    if (data.blacklist) megaState.blacklist = data.blacklist;
+                    if (data.forumMyPosts) megaState.forumMyPosts = data.forumMyPosts;
+                    if (data.forumFavPosts) megaState.forumFavPosts = data.forumFavPosts;
+
+                    // 持久化存储
+                    saveSettings();
+                    saveLists();
+                    saveBlacklist(megaState.blacklist);
+                    saveForumData();
+
+                    showToast('数据导入成功！页面即将刷新...');
+                    setTimeout(() => location.reload(), 1500);
+                } catch (err) {
+                    alert('导入失败：文件格式不正确！');
+                }
+            };
+            reader.readAsText(file);
+            e.target.value = ''; // 重置 file input
         };
     }
 
     function renderTabs() {
-        if (megaState.activeTab === 'tab-extract') {
-            if (megaState.settings.enableBookList && megaState.extractData.length === 0) {
-                megaState.extractData = performExtraction();
-            }
-            renderExtractList();
-        }
+        if (megaState.activeTab === 'tab-extract') { if (megaState.settings.enableBookList && !megaState.extractData.length) megaState.extractData = performExtraction(); renderExtractList(); }
         else if (megaState.activeTab === 'tab-list') renderListTabUI();
         else if (megaState.activeTab === 'tab-blacklist') renderBlacklistTab();
-    }
-
-    // ============================================================
-    // 初始化路由引擎
-    // ============================================================
-    function bootstrap() {
-        // 全局生效模块
-        initLightNovelSearch();
-        initBlacklistDOM();
-        initFormatter();
-
-        // 面板渲染
-        if (IS_NOVELIA) {
-            initMegaUI();
-        }
+        else if (megaState.activeTab === 'tab-forum-my') { renderForumMy(); syncForumData('my'); }
+        else if (megaState.activeTab === 'tab-forum-fav') { renderForumFav(); syncForumData('fav'); }
     }
 
     // ============================================================
@@ -781,26 +970,17 @@
     // ============================================================
     let isMegaInitialized = false;
 
-    // 将 bootstrap 改名为 initMegaPack
     function initMegaPack() {
         if (isMegaInitialized) return;
         isMegaInitialized = true;
 
-        // 全局生效模块
         initLightNovelSearch();
         initBlacklistDOM();
         initFormatter();
+        initForumManager();
 
-        // 面板渲染
-        if (IS_NOVELIA) {
-            initMegaUI();
-        }
+        if (IS_NOVELIA) { initMegaUI(); }
     }
-
-    // 将下面所有的 bootstrap 调用都改成 initMegaPack
-    const pushState = history.pushState;
-    history.pushState = function() { pushState.apply(history, arguments); setTimeout(initMegaPack, 500); };
-    window.addEventListener('popstate', () => setTimeout(initMegaPack, 500));
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', initMegaPack);
