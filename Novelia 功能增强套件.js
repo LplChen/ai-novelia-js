@@ -1,18 +1,17 @@
 // ==UserScript==
-// @name         Novelia 功能增强套件
-// @namespace     https://n.novelia.cc/
-// @version      2.3.0
-// @description   整合LightNovel搜索、书单助手、黑名单、简介排版、论坛管理。支持统一UI、字段排序、书单预览与导入导出。
-// @author       Gemini
-// @match        https://n.novelia.cc/*
-// @match        https://n.sakura-share.one/*
-// @match        https://lightnovel.jp/publicationdate/*
-// @grant        GM_setValue
-// @grant        GM_getValue
-// @grant        GM_addStyle
-// @grant        GM_setClipboard
-// @run-at       document-idle
-// @updateURL     https://raw.githubusercontent.com/LplChen/ai-novelia-js/refs/heads/main/Novelia%20%E5%8A%9F%E8%83%BD%E5%A2%9E%E5%BC%BA%E5%A5%97%E4%BB%B6.js
+// @name                     Novelia 功能增强套件
+// @namespace         https://n.novelia.cc/
+// @version                  2.4.0
+// @description         整合LightNovel搜索、书单助手、黑名单、简介排版、论坛管理。支持统一UI、字段排序、书单预览与导入导出。
+// @author                   Gemini
+// @match                    https://n.novelia.cc/*
+// @match                    https://lightnovel.jp/publicationdate/*
+// @grant                      GM_setValue
+// @grant                      GM_getValue
+// @grant                      GM_addStyle
+// @grant                      GM_setClipboard
+// @run-at                    document-idle
+// @updateURL          https://raw.githubusercontent.com/LplChen/ai-novelia-js/refs/heads/main/Novelia%20%E5%8A%9F%E8%83%BD%E5%A2%9E%E5%BC%BA%E5%A5%97%E4%BB%B6.js
 // @downloadURL    https://raw.githubusercontent.com/LplChen/ai-novelia-js/refs/heads/main/Novelia%20%E5%8A%9F%E8%83%BD%E5%A2%9E%E5%BC%BA%E5%A5%97%E4%BB%B6.js
 // ==/UserScript==
 
@@ -152,9 +151,10 @@
             .m-table.fav-table .m-col-time { width: 15%; }
             .m-table.fav-table .m-col-stats { width: 16%; }
             .m-table.fav-table .m-col-action { width: 12%; text-align: center; }
-            .m-table.my-table .m-col-title { width: 69%; }
+
+            .m-table.my-table .m-col-title { width: calc(67%); }
             .m-table.my-table .m-col-time { width: 15%; }
-            .m-table.my-table .m-col-stats { width: 16%; }
+            .m-table.my-table .m-col-stats { width: calc(18%); }
 
             .m-title-wrap { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; white-space: normal; line-height: 1.5; font-weight: 500; }
             .m-diff-up { color: #e88080; font-size: 12px; margin-left: 4px; font-weight: bold; }
@@ -422,7 +422,7 @@
                 const data = await res.json();
                 let ts = data.updateAt ? parseInt(data.updateAt) : null;
                 if (ts && ts < 10000000000) ts *= 1000;
-                return { deleted: false, views: data.numViews !== undefined ? parseInt(data.numViews) : null, replies: data.numComments !== undefined ? parseInt(data.numComments) : null, updateTimestamp: ts, author: data.user?.username };
+                return { deleted: false, title: data.title, views: data.numViews !== undefined ? parseInt(data.numViews) : null, replies: data.numComments !== undefined ? parseInt(data.numComments) : null, updateTimestamp: ts, author: data.user?.username };
             } catch (e) { return null; }
         }
     };
@@ -469,9 +469,9 @@
                             saveForumData();
                         } else {
                             if(views > megaState.forumMyPosts[id].views || replies > megaState.forumMyPosts[id].replies) {
-                                megaState.forumMyPosts[id].views = Math.max(views, megaState.forumMyPosts[id].views);
-                                megaState.forumMyPosts[id].replies = Math.max(replies, megaState.forumMyPosts[id].replies);
-                                saveForumData();
+                               megaState.forumMyPosts[id].views = Math.max(views, megaState.forumMyPosts[id].views);
+                               megaState.forumMyPosts[id].replies = Math.max(replies, megaState.forumMyPosts[id].replies);
+                               saveForumData();
                             }
                         }
                     }
@@ -533,7 +533,13 @@
                     const mainDiv = el.querySelector('.n-list-item__main > div');
                     if (!mainDiv) return;
 
-                    const a = mainDiv.querySelector('a:first-child');
+                    // 获取所有的 <a> 标签
+                    const allLinks = Array.from(mainDiv.querySelectorAll('a'));
+
+                    // 🌟 修复 1：通过是否包含 ?query= 来精准区分书名链接和标签链接
+                    const titleLink = allLinks.find(a => !a.href.includes('?query=')) || allLinks[0];
+                    const tags = allLinks.filter(a => a.href.includes('?query=')).map(a => a.textContent.trim());
+
                     const cnNode = mainDiv.querySelector('span.n-text.__text-dark-131ezvy-d');
                     let status = "未知", chapters = "未知";
 
@@ -547,11 +553,11 @@
                         if (chapMatch) chapters = chapMatch[1];
                     });
 
-                    const jpTitle = a ? (a.textContent || '').trim() : '';
+                    const jpTitle = titleLink ? (titleLink.textContent || '').trim() : '';
                     const cnTitle = cnNode ? (cnNode.textContent || '').trim() : jpTitle;
-                    const link = a ? a.href : '';
+                    const link = titleLink ? titleLink.href : '';
 
-                    items.push({ type: 'web', jp_title: jpTitle, cn_title: cnTitle, link: link, status: status, chapters: chapters, tags: [] });
+                    items.push({ type: 'web', jp_title: jpTitle, cn_title: cnTitle, link: link, status: status, chapters: chapters, tags: tags });
                 } catch (e) {
                     console.error('抓取网络小说失败，跳过该条目:', e);
                 }
@@ -595,7 +601,15 @@
             const fields = megaState.extractData.some(b => b.type === 'wenku') ? megaState.settings.fields_wenku : megaState.settings.fields_web;
             megaState.selectedExtract.forEach(idx => {
                 const b = megaState.extractData[idx];
-                let text = fields.filter(f => f.active).map(f => f.format.replace(/{{jp_title}}/g, b.jp_title||b.cn_title||'').replace(/{{cn_title}}/g, b.cn_title||b.jp_title).replace(/{{link}}/g, b.link||'').replace(/{{status}}/g, b.status||'').replace(/{{chapters}}/g, b.chapters||'')).join('\n');
+                // 🌟 修复 2：补全 {{tags}} 的替换逻辑
+                let text = fields.filter(f => f.active).map(f => f.format
+                    .replace(/{{jp_title}}/g, b.jp_title||b.cn_title||'')
+                    .replace(/{{cn_title}}/g, b.cn_title||b.jp_title)
+                    .replace(/{{link}}/g, b.link||'')
+                    .replace(/{{status}}/g, b.status||'')
+                    .replace(/{{chapters}}/g, b.chapters||'')
+                    .replace(/{{tags}}/g, (b.tags && b.tags.length > 0) ? b.tags.join(', ') : '无')
+                ).join('\n');
                 list.push(text + '\n');
             });
             megaState.lists[target] = list; saveLists(); megaState.selectedExtract.clear(); renderExtractList(); showToast(`已添加至 ${target}`);
@@ -631,7 +645,7 @@
         let diffReplies = post.newReplies ? `<span class="m-diff-up">+${post.newReplies}</span>` : '';
         let ts = fUtils.getTs(post);
         let recentMark = (isFav && ts && (Date.now() - ts) < 86400000) ? `<span class="m-recent-update">24h内更新</span>` : '';
-        let actionTd = isFav ? `<td class="m-col-action"><button class="m-btn m-btn-danger" onclick="window.removeForumPost('${post.id}', 'fav')">移除</button></td>` : '';
+        let actionTd = isFav ? `<td class="m-col-action"><button class="m-btn m-btn-danger btn-remove-fav" data-id="${post.id}">移除</button></td>` : '';
 
         return `<tr>
             <td class="m-col-title"><div class="m-title-wrap"><a href="/forum/${post.id}" target="_blank">${post.title}</a> ${recentMark}</div></td>
@@ -641,36 +655,42 @@
         </tr>`;
     }
 
-    window.removeForumPost = function(id, type) {
-        if (type === 'my') delete megaState.forumMyPosts[id]; else delete megaState.forumFavPosts[id];
-        saveForumData();
-        if (type === 'my') renderForumMy(); else renderForumFav();
-    };
-
     function renderForumMy() {
-        let list = Object.values(megaState.forumMyPosts);
-        if (megaState.forumSearchMy) list = list.filter(p => p.title.toLowerCase().includes(megaState.forumSearchMy.toLowerCase()));
-        document.getElementById('list-forum-my-tbody').innerHTML = sortPosts(list, megaState.forumSortMy).map(p => renderForumRowHTML(p, false)).join('');
+        let list = Object.values(megaState.forumMyPosts || {});
+        if (megaState.forumSearchMy) {
+            list = list.filter(p => (p.title || '').toLowerCase().includes(megaState.forumSearchMy.toLowerCase()));
+        }
+        const tbody = document.getElementById('list-forum-my-tbody');
+        if (tbody) {
+            tbody.innerHTML = sortPosts(list, megaState.forumSortMy).map(p => renderForumRowHTML(p, false)).join('');
+        }
     }
+
     function renderForumFav() {
-        let list = Object.values(megaState.forumFavPosts);
-        if (megaState.forumSearchFav) list = list.filter(p => p.title.toLowerCase().includes(megaState.forumSearchFav.toLowerCase()));
-        document.getElementById('list-forum-fav-tbody').innerHTML = sortPosts(list, megaState.forumSortFav).map(p => renderForumRowHTML(p, true)).join('');
+        let list = Object.values(megaState.forumFavPosts || {});
+        if (megaState.forumSearchFav) {
+            list = list.filter(p => (p.title || '').toLowerCase().includes(megaState.forumSearchFav.toLowerCase()));
+        }
+        const tbody = document.getElementById('list-forum-fav-tbody');
+        if (tbody) {
+            tbody.innerHTML = sortPosts(list, megaState.forumSortFav).map(p => renderForumRowHTML(p, true)).join('');
+        }
     }
 
     async function syncForumData(type) {
         const isMy = type === 'my';
         const dict = isMy ? megaState.forumMyPosts : megaState.forumFavPosts;
         const statusEl = document.getElementById(isMy ? 'm-forum-my-status' : 'm-forum-fav-status');
-        let ids = Object.keys(dict);
+        let ids = Object.keys(dict || {});
         if (!ids.length) return;
 
-        statusEl.textContent = "同步中...";
+        if(statusEl) statusEl.textContent = "同步中...";
         for (let id of ids) {
             let post = dict[id];
             let apiData = await fUtils.fetchPost(id);
             if (apiData) {
                 if (apiData.deleted) { delete dict[id]; continue; }
+                if (apiData.title) post.title = apiData.title;
                 if (apiData.views !== null) { post.newViews = Math.max(0, apiData.views - (post.views || 0)); post.views = apiData.views; }
                 if (apiData.replies !== null) { post.newReplies = Math.max(0, apiData.replies - (post.replies || 0)); post.replies = apiData.replies; }
                 if (apiData.updateTimestamp) post.updateTimestamp = apiData.updateTimestamp;
@@ -679,7 +699,7 @@
             await new Promise(r => setTimeout(r, 1500));
         }
         saveForumData();
-        statusEl.textContent = `同步完成 (${ids.length}条)`;
+        if(statusEl) statusEl.textContent = `同步完成 (${ids.length}条)`;
     }
 
     // --- 初始化 UI 与事件 ---
@@ -872,7 +892,7 @@
                 const match = rgb.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
                 t = (match && ((parseInt(match[1])*299 + parseInt(match[2])*587 + parseInt(match[3])*114)/1000) < 128) ? 'dark' : 'light';
             }
-            p.className = t === 'dark' ? 'mega-dark' : 'mega-light';
+            if(p) p.className = t === 'dark' ? 'mega-dark' : 'mega-light';
         };
 
         const togglePanel = () => {
@@ -889,28 +909,28 @@
                 document.querySelectorAll('.m-tab-pane').forEach(p => p.classList.remove('active'));
                 btn.classList.add('active');
                 megaState.activeTab = btn.dataset.tab;
-                document.getElementById(megaState.activeTab).classList.add('active');
+                const activePane = document.getElementById(megaState.activeTab);
+                if(activePane) activePane.classList.add('active');
                 renderTabs();
             };
         });
 
         setInterval(() => { if (megaState.panelOpen && megaState.settings.theme === 'auto') updateTheme(); }, 2000);
 
-        initExtractTab(); initListTab(); initBlacklistTab(); initSettingsTab(); initForumUIEvents();
+        initExtractTab(); initListTab(); initBlacklistTab(); initSettingsTab();
+        initForumUIEvents();
     }
 
     // ============================================================
-    // 书单抓取与管理逻辑增强
+    // 书单抓取与管理逻辑
     // ============================================================
     function initListTab() {
         const sel = document.getElementById('sel-manage-list'), ed = document.getElementById('editor-list');
-        sel.onchange = () => { megaState.currentListId = sel.value; ed.value = (megaState.lists[sel.value] || []).join('\n'); };
-        ed.oninput = () => { megaState.lists[megaState.currentListId] = [ed.value]; saveLists(); };
+        if(sel) sel.onchange = () => { megaState.currentListId = sel.value; ed.value = (megaState.lists[sel.value] || []).join('\n'); };
+        if(ed) ed.oninput = () => { megaState.lists[megaState.currentListId] = [ed.value]; saveLists(); };
 
         document.getElementById('btn-new-list').onclick = () => { const n = prompt("新书单名称："); if (n && !megaState.lists[n]) { megaState.lists[n] = []; megaState.currentListId = n; saveLists(); renderListTabUI(); renderExtractList(); } };
-
         document.getElementById('btn-del-list').onclick = () => { if (confirm(`删除 "${megaState.currentListId}"？`)) { delete megaState.lists[megaState.currentListId]; megaState.currentListId = Object.keys(megaState.lists)[0] || ''; saveLists(); renderListTabUI(); renderExtractList(); } };
-
         document.getElementById('btn-copy-list').onclick = () => { GM_setClipboard(ed.value); showToast('已复制'); };
 
         document.getElementById('btn-rename-list').onclick = () => {
@@ -933,7 +953,7 @@
 
         document.getElementById('btn-insert-rating').onclick = () => {
             const rating = prompt("请输入评分 (例如: ★★★★☆ 或 9.5/10)：", "★★★★☆");
-            if(rating) {
+            if(rating && ed) {
                 const start = ed.selectionStart;
                 const end = ed.selectionEnd;
                 const text = ed.value;
@@ -951,14 +971,15 @@
         document.getElementById('btn-preview-list').onclick = () => {
             const previewDiv = document.getElementById('preview-container');
             const btn = document.getElementById('btn-preview-list');
+            if(!previewDiv || !ed) return;
 
             if (previewDiv.style.display === 'none') {
                 let html = ed.value
-                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-                .replace(/### \[(.*?)\]\((.*?)\)/g, '<h3 style="margin: 14px 0 6px 0;"><a href="$2" target="_blank" style="color:var(--mega-primary); text-decoration:none;">$1</a></h3>')
-                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                .replace(/---/g, '<hr style="border:none; border-top:1px dashed rgba(128,128,128,0.3); margin:12px 0;">')
-                .replace(/\n/g, '<br>');
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    .replace(/### \[(.*?)\]\((.*?)\)/g, '<h3 style="margin: 14px 0 6px 0;"><a href="$2" target="_blank" style="color:var(--mega-primary); text-decoration:none;">$1</a></h3>')
+                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                    .replace(/---/g, '<hr style="border:none; border-top:1px dashed rgba(128,128,128,0.3); margin:12px 0;">')
+                    .replace(/\n/g, '<br>');
                 previewDiv.innerHTML = html;
                 previewDiv.style.display = 'block';
                 ed.style.display = 'none';
@@ -972,18 +993,23 @@
     }
 
     function renderListTabUI() {
-        const sel = document.getElementById('sel-manage-list'); sel.innerHTML = '';
-        Object.keys(megaState.lists || {}).forEach(k => sel.appendChild(new Option(k, k, false, k === megaState.currentListId)));
-        document.getElementById('editor-list').value = (megaState.lists[megaState.currentListId] || []).join('\n');
+        const sel = document.getElementById('sel-manage-list');
+        const ed = document.getElementById('editor-list');
+        if(sel) {
+            sel.innerHTML = '';
+            Object.keys(megaState.lists || {}).forEach(k => sel.appendChild(new Option(k, k, false, k === megaState.currentListId)));
+        }
+        if(ed) ed.value = (megaState.lists[megaState.currentListId] || []).join('\n');
     }
 
     // ============================================================
-    // 设置模块与排版字段管理
+    // 设置与排版管理
     // ============================================================
     function renderFieldSettings(containerId, fieldsKey) {
         const container = document.getElementById(containerId);
+        if(!container) return;
         container.innerHTML = '';
-        const arr = megaState.settings[fieldsKey];
+        const arr = megaState.settings[fieldsKey] || [];
 
         arr.forEach((field, i) => {
             const div = document.createElement('div');
@@ -999,26 +1025,11 @@
                 </div>
             `;
 
-            div.querySelector('input').onchange = (e) => {
-                field.active = e.target.checked;
-                saveSettings();
-            };
+            div.querySelector('input').onchange = (e) => { field.active = e.target.checked; saveSettings(); };
 
             const btns = div.querySelectorAll('button');
-            btns[0].onclick = () => {
-                if(i > 0) {
-                    [arr[i], arr[i-1]] = [arr[i-1], arr[i]];
-                    saveSettings();
-                    renderFieldSettings(containerId, fieldsKey);
-                }
-            };
-            btns[1].onclick = () => {
-                if(i < arr.length-1) {
-                    [arr[i], arr[i+1]] = [arr[i+1], arr[i]];
-                    saveSettings();
-                    renderFieldSettings(containerId, fieldsKey);
-                }
-            };
+            btns[0].onclick = () => { if(i > 0) { [arr[i], arr[i-1]] = [arr[i-1], arr[i]]; saveSettings(); renderFieldSettings(containerId, fieldsKey); } };
+            btns[1].onclick = () => { if(i < arr.length-1) { [arr[i], arr[i+1]] = [arr[i+1], arr[i]]; saveSettings(); renderFieldSettings(containerId, fieldsKey); } };
             container.appendChild(div);
         });
     }
@@ -1035,75 +1046,129 @@
         });
 
         const selTheme = document.getElementById('sel-theme');
-        selTheme.value = megaState.settings.theme;
-        selTheme.onchange = () => {
-            megaState.settings.theme = selTheme.value; saveSettings();
-            document.getElementById('mega-panel').className = selTheme.value === 'dark' ? 'mega-dark' : 'mega-light';
-        };
+        if(selTheme) {
+            selTheme.value = megaState.settings.theme;
+            selTheme.onchange = () => {
+                megaState.settings.theme = selTheme.value; saveSettings();
+                const p = document.getElementById('mega-panel');
+                if(p) p.className = selTheme.value === 'dark' ? 'mega-dark' : 'mega-light';
+            };
+        }
 
         renderFieldSettings('fields-web-container', 'fields_web');
         renderFieldSettings('fields-wenku-container', 'fields_wenku');
 
         document.getElementById('btn-export-all').onclick = () => {
-            const dataToExport = {
-                settings: megaState.settings,
-                lists: megaState.lists,
-                blacklist: megaState.blacklist,
-                forumMyPosts: megaState.forumMyPosts,
-                forumFavPosts: megaState.forumFavPosts
-            };
+            const dataToExport = { settings: megaState.settings, lists: megaState.lists, blacklist: megaState.blacklist, forumMyPosts: megaState.forumMyPosts, forumFavPosts: megaState.forumFavPosts };
             const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = `novelia_megapack_backup_${new Date().toISOString().slice(0, 10)}.json`;
-            a.click();
-            showToast('数据导出成功！');
+            const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `novelia_megapack_backup_${new Date().toISOString().slice(0, 10)}.json`; a.click(); showToast('数据导出成功！');
         };
 
-        document.getElementById('btn-import-all').onclick = () => {
-            document.getElementById('file-import-all').click();
-        };
+        document.getElementById('btn-import-all').onclick = () => { document.getElementById('file-import-all').click(); };
 
-        document.getElementById('file-import-all').onchange = (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = (ev) => {
-                try {
-                    const data = JSON.parse(ev.target.result);
-                    if (data.settings) megaState.settings = data.settings;
-                    if (data.lists) megaState.lists = data.lists;
-                    if (data.blacklist) megaState.blacklist = data.blacklist;
-                    if (data.forumMyPosts) megaState.forumMyPosts = data.forumMyPosts;
-                    if (data.forumFavPosts) megaState.forumFavPosts = data.forumFavPosts;
-
-                    saveSettings();
-                    saveLists();
-                    saveBlacklist(megaState.blacklist);
-                    saveForumData();
-
-                    showToast('数据导入成功！页面即将刷新...');
-                    setTimeout(() => location.reload(), 1500);
-                } catch (err) {
-                    alert('导入失败：文件格式不正确！');
-                }
+        const importInput = document.getElementById('file-import-all');
+        if(importInput) {
+            importInput.onchange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    try {
+                        const data = JSON.parse(ev.target.result);
+                        if (data.settings) megaState.settings = data.settings;
+                        if (data.lists) megaState.lists = data.lists;
+                        if (data.blacklist) megaState.blacklist = data.blacklist;
+                        if (data.forumMyPosts) megaState.forumMyPosts = data.forumMyPosts;
+                        if (data.forumFavPosts) megaState.forumFavPosts = data.forumFavPosts;
+                        saveSettings(); saveLists(); saveBlacklist(megaState.blacklist); saveForumData();
+                        showToast('数据导入成功！页面即将刷新...');
+                        setTimeout(() => location.reload(), 1500);
+                    } catch (err) { alert('导入失败：文件格式不正确！'); }
+                };
+                reader.readAsText(file);
+                e.target.value = '';
             };
-            reader.readAsText(file);
-            e.target.value = '';
-        };
+        }
     }
 
     function renderTabs() {
         if (megaState.activeTab === 'tab-extract') {
-            if (megaState.settings.enableBookList && !megaState.extractData.length) {
-                megaState.extractData = performExtraction();
-            }
+            if (megaState.settings.enableBookList && !megaState.extractData.length) { megaState.extractData = performExtraction(); }
             renderExtractList();
         }
         else if (megaState.activeTab === 'tab-list') renderListTabUI();
         else if (megaState.activeTab === 'tab-blacklist') renderBlacklistTab();
         else if (megaState.activeTab === 'tab-forum-my') { renderForumMy(); syncForumData('my'); }
         else if (megaState.activeTab === 'tab-forum-fav') { renderForumFav(); syncForumData('fav'); }
+    }
+
+    // ============================================================
+    // 论坛事件绑定防崩溃与重构
+    // ============================================================
+    function initForumUIEvents() {
+        const searchMy = document.getElementById('m-search-forum-my');
+        if (searchMy) searchMy.addEventListener('input', (e) => { megaState.forumSearchMy = e.target.value; renderForumMy(); });
+
+        const sortMy = document.getElementById('m-sort-forum-my');
+        if (sortMy) sortMy.addEventListener('change', (e) => { megaState.forumSortMy = e.target.value; renderForumMy(); });
+
+        const searchFav = document.getElementById('m-search-forum-fav');
+        if (searchFav) searchFav.addEventListener('input', (e) => { megaState.forumSearchFav = e.target.value; renderForumFav(); });
+
+        const sortFav = document.getElementById('m-sort-forum-fav');
+        if (sortFav) sortFav.addEventListener('change', (e) => { megaState.forumSortFav = e.target.value; renderForumFav(); });
+
+        const btnImportMine = document.getElementById('m-btn-import-mine');
+        if (btnImportMine) {
+            btnImportMine.addEventListener('click', async () => {
+                const url = prompt("请输入你的帖子链接:");
+                if (!url) return;
+                const id = url.match(/\/forum\/([a-f0-9]{24})/i)?.[1];
+                if (!id) return alert("无效链接！");
+
+                const apiData = await fetch(`/api/article/${id}`).then(r => r.json()).catch(() => null);
+                const user = document.querySelector('.n-layout-header .n-button__content')?.textContent.replace('@', '').trim();
+
+                if (apiData && apiData.user?.username === user) {
+                    megaState.forumMyPosts[id] = { id, url, title: apiData.title || "未知标题", views: parseInt(apiData.numViews)||0, replies: parseInt(apiData.numComments)||0, updateTimestamp: apiData.updateAt?(parseInt(apiData.updateAt)* (apiData.updateAt<10000000000?1000:1)):Date.now(), newViews:0, newReplies:0 };
+                    saveForumData(); showToast("添加至发帖记录！"); syncForumData('my');
+                } else {
+                    alert("验证失败：该帖子作者不是你当前登录账号，已自动转移至收藏列表。");
+                    megaState.forumFavPosts[id] = { id, url, title: apiData?.title || "未知标题", views: parseInt(apiData?.numViews)||0, replies: parseInt(apiData?.numComments)||0, updateTimestamp: apiData?.updateAt?(parseInt(apiData.updateAt)* (apiData.updateAt<10000000000?1000:1)):Date.now(), newViews:0, newReplies:0 };
+                    saveForumData(); syncForumData('fav');
+                }
+            });
+        }
+
+        const btnImportFav = document.getElementById('m-btn-import-fav');
+        if (btnImportFav) {
+            btnImportFav.addEventListener('click', async () => {
+                const url = prompt("请输入你想收藏的帖子链接:");
+                if (!url) return;
+                const id = url.match(/\/forum\/([a-f0-9]{24})/i)?.[1];
+                if (!id) return alert("无效链接！");
+                if(!megaState.forumFavPosts[id]) {
+                    const apiData = await fetch(`/api/article/${id}`).then(r => r.json()).catch(() => null);
+                    megaState.forumFavPosts[id] = { id, url, title: apiData?.title || "未知标题", views: parseInt(apiData?.numViews)||0, replies: parseInt(apiData?.numComments)||0, updateTimestamp: apiData?.updateAt?(parseInt(apiData.updateAt)* (apiData.updateAt<10000000000?1000:1)):Date.now(), newViews:0, newReplies:0 };
+                    saveForumData(); showToast("已加入收藏！"); syncForumData('fav');
+                } else { alert("该帖子已在收藏中。"); }
+            });
+        }
+
+        const favTbody = document.getElementById('list-forum-fav-tbody');
+        if (favTbody) {
+            favTbody.addEventListener('click', (e) => {
+                if (e.target.classList.contains('btn-remove-fav')) {
+                    const id = e.target.getAttribute('data-id');
+                    if (id) {
+                        delete megaState.forumFavPosts[id];
+                        saveForumData();
+                        renderForumFav();
+                        showToast('已移除收藏');
+                    }
+                }
+            });
+        }
     }
 
     function initBlacklistTab() {
@@ -1120,6 +1185,7 @@
     function renderBlacklistTab() {
         document.getElementById('bl-count').textContent = `共 ${megaState.blacklist.length} 条记录`;
         const c = document.getElementById('list-blacklist');
+        if(!c) return;
         c.innerHTML = megaState.blacklist.length ? '' : '<div style="padding:40px;text-align:center;opacity:0.6;">黑名单为空</div>';
         megaState.blacklist.forEach(item => {
             const row = document.createElement('div'); row.style.cssText = 'display:flex; align-items:center; gap:10px; padding:6px 10px; border-radius:4px; transition:0.2s;'; row.className = 'm-item';
