@@ -1,18 +1,18 @@
 // ==UserScript==
-// @name                     Novelia 功能增强套件
-// @namespace         https://n.novelia.cc/
-// @version                  2.4.0
-// @description         整合LightNovel搜索、书单助手、黑名单、简介排版、论坛管理。支持统一UI、字段排序、书单预览与导入导出。
-// @author                   Gemini
-// @match                    https://n.novelia.cc/*
-// @match                    https://lightnovel.jp/publicationdate/*
-// @grant                      GM_setValue
-// @grant                      GM_getValue
-// @grant                      GM_addStyle
-// @grant                      GM_setClipboard
-// @run-at                    document-idle
-// @updateURL          https://raw.githubusercontent.com/LplChen/ai-novelia-js/refs/heads/main/Novelia%20%E5%8A%9F%E8%83%BD%E5%A2%9E%E5%BC%BA%E5%A5%97%E4%BB%B6.js
-// @downloadURL    https://raw.githubusercontent.com/LplChen/ai-novelia-js/refs/heads/main/Novelia%20%E5%8A%9F%E8%83%BD%E5%A2%9E%E5%BC%BA%E5%A5%97%E4%BB%B6.js
+// @name             Novelia 功能增强套件
+// @namespace        https://n.novelia.cc/
+// @version          2.4.0
+// @description      整合LightNovel搜索、书单助手、黑名单、简介排版、论坛管理。支持统一UI、字段排序、书单预览与导入导出。
+// @author           Gemini
+// @match            https://n.novelia.cc/*
+// @match            https://lightnovel.jp/publicationdate/*
+// @grant            GM_setValue
+// @grant            GM_getValue
+// @grant            GM_addStyle
+// @grant            GM_setClipboard
+// @run-at           document-idle
+// @updateURL        https://raw.githubusercontent.com/LplChen/ai-novelia-js/refs/heads/main/Novelia%20%E5%8A%9F%E8%83%BD%E5%A2%9E%E5%BC%BA%E5%A5%97%E4%BB%B6.js
+// @downloadURL      https://raw.githubusercontent.com/LplChen/ai-novelia-js/refs/heads/main/Novelia%20%E5%8A%9F%E8%83%BD%E5%A2%9E%E5%BC%BA%E5%A5%97%E4%BB%B6.js
 // ==/UserScript==
 
 (function () {
