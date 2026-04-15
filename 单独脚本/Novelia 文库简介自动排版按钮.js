@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Novelia 文库简介自动排版按钮
 // @namespace    http://tampermonkey.net/
-// @version      4.0
+// @version      4.1
 // @description  自动排版文库小说简介，去除空格空行，按71字加标点折行，智能匹配引号及特殊符号
 // @author       Gemini
 // @match        https://n.novelia.cc/*
@@ -206,7 +206,7 @@
 
     function checkAndInject() {
         // 仅在 wenku-edit 路由下执行
-        if (!location.href.includes('/wenku-edit/')) return;
+        if (!location.href.includes('/wenku-edit')) return;
         // 如果已经插入过，则不重复插入
         if (document.getElementById('auto-format-btn')) return;
 
