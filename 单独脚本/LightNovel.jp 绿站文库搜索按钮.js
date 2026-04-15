@@ -7,6 +7,8 @@
 // @match        https://lightnovel.jp/publicationdate/*
 // @grant        GM_addStyle
 // @run-at       document-end
+// @updateURL    https://raw.githubusercontent.com/LplChen/ai-novelia-js/refs/heads/main/%E5%8D%95%E7%8B%AC%E8%84%9A%E6%9C%AC/LightNovel.jp%20%E7%BB%BF%E7%AB%99%E6%96%87%E5%BA%93%E6%90%9C%E7%B4%A2%E6%8C%89%E9%92%AE.js
+// @downloadURL   https://raw.githubusercontent.com/LplChen/ai-novelia-js/refs/heads/main/%E5%8D%95%E7%8B%AC%E8%84%9A%E6%9C%AC/LightNovel.jp%20%E7%BB%BF%E7%AB%99%E6%96%87%E5%BA%93%E6%90%9C%E7%B4%A2%E6%8C%89%E9%92%AE.js
 // ==/UserScript==
 
 (function() {
