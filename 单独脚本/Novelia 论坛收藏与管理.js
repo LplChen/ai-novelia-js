@@ -10,6 +10,8 @@
 // @grant        GM_getValue
 // @grant        GM_addStyle
 // @run-at       document-end
+// @updateURL     https://raw.githubusercontent.com/LplChen/ai-novelia-js/refs/heads/main/%E5%8D%95%E7%8B%AC%E8%84%9A%E6%9C%AC/Novelia%20%E8%AE%BA%E5%9D%9B%E6%94%B6%E8%97%8F%E4%B8%8E%E7%AE%A1%E7%90%86.js
+// @downloadURL   https://raw.githubusercontent.com/LplChen/ai-novelia-js/refs/heads/main/%E5%8D%95%E7%8B%AC%E8%84%9A%E6%9C%AC/Novelia%20%E8%AE%BA%E5%9D%9B%E6%94%B6%E8%97%8F%E4%B8%8E%E7%AE%A1%E7%90%86.js
 // ==/UserScript==
 
 (function() {
