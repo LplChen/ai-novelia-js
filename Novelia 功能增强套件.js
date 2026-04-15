@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Novelia 功能增强套件
 // @namespace    https://n.novelia.cc/
-// @version      2.1.0
+// @version      2.2.0
 // @description  整合LightNovel搜索、书单助手、黑名单、简介排版、论坛发帖追踪与收藏。支持统一UI、模块化开关与本地数据导入导出。
 // @author       Gemini
 // @match        https://n.novelia.cc/*
@@ -358,7 +358,7 @@
         };
 
         const inject = () => {
-            if (!location.href.includes('/wenku-edit/')) return;
+            if (!location.href.includes('/wenku-edit')) return;
             if (document.getElementById('mega-format-btn')) return;
 
             const labels = Array.from(document.querySelectorAll('span.n-form-item-label__text'));
