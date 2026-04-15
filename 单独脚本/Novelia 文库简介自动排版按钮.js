@@ -6,6 +6,8 @@
 // @author       Gemini
 // @match        https://n.novelia.cc/*
 // @grant        none
+// @updateURL     https://raw.githubusercontent.com/LplChen/ai-novelia-js/refs/heads/main/%E5%8D%95%E7%8B%AC%E8%84%9A%E6%9C%AC/Novelia%20%E6%96%87%E5%BA%93%E7%AE%80%E4%BB%8B%E8%87%AA%E5%8A%A8%E6%8E%92%E7%89%88%E6%8C%89%E9%92%AE.js
+// @downloadURL   https://raw.githubusercontent.com/LplChen/ai-novelia-js/refs/heads/main/%E5%8D%95%E7%8B%AC%E8%84%9A%E6%9C%AC/Novelia%20%E6%96%87%E5%BA%93%E7%AE%80%E4%BB%8B%E8%87%AA%E5%8A%A8%E6%8E%92%E7%89%88%E6%8C%89%E9%92%AE.js
 // ==/UserScript==
 
 (function() {
