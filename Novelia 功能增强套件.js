@@ -11,8 +11,8 @@
 // @grant        GM_addStyle
 // @grant        GM_setClipboard
 // @run-at       document-idle
-// @updateURL        https://raw.githubusercontent.com/LplChen/ai-novelia-js/refs/heads/main/Novelia%20%E5%8A%9F%E8%83%BD%E5%A2%9E%E5%BC%BA%E5%A5%97%E4%BB%B6.js
-// @downloadURL      https://raw.githubusercontent.com/LplChen/ai-novelia-js/refs/heads/main/Novelia%20%E5%8A%9F%E8%83%BD%E5%A2%9E%E5%BC%BA%E5%A5%97%E4%BB%B6.js
+// @updateURL    https://raw.githubusercontent.com/LplChen/ai-novelia-js/refs/heads/main/Novelia%20%E5%8A%9F%E8%83%BD%E5%A2%9E%E5%BC%BA%E5%A5%97%E4%BB%B6.js
+// @downloadURL  https://raw.githubusercontent.com/LplChen/ai-novelia-js/refs/heads/main/Novelia%20%E5%8A%9F%E8%83%BD%E5%A2%9E%E5%BC%BA%E5%A5%97%E4%BB%B6.js
 // ==/UserScript==
 
 (function () {
