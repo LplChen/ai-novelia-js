@@ -1,16 +1,16 @@
 // ==UserScript==
-// @name             Novelia 功能增强套件
-// @namespace        https://n.novelia.cc/
-// @version          2.4.0
-// @description      整合LightNovel搜索、书单助手、黑名单、简介排版、论坛管理。支持统一UI、字段排序、书单预览与导入导出。
-// @author           Gemini
-// @match            https://n.novelia.cc/*
-// @match            https://lightnovel.jp/publicationdate/*
-// @grant            GM_setValue
-// @grant            GM_getValue
-// @grant            GM_addStyle
-// @grant            GM_setClipboard
-// @run-at           document-idle
+// @name         Novelia 功能增强套件
+// @namespace    https://n.novelia.cc/
+// @version      2.4.1
+// @description  整合LightNovel搜索、书单助手、黑名单、简介排版、论坛管理。支持统一UI、字段排序、书单预览与导入导出。
+// @author       Gemini
+// @match        https://n.novelia.cc/*
+// @match        https://lightnovel.jp/publicationdate/*
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_addStyle
+// @grant        GM_setClipboard
+// @run-at       document-idle
 // @updateURL        https://raw.githubusercontent.com/LplChen/ai-novelia-js/refs/heads/main/Novelia%20%E5%8A%9F%E8%83%BD%E5%A2%9E%E5%BC%BA%E5%A5%97%E4%BB%B6.js
 // @downloadURL      https://raw.githubusercontent.com/LplChen/ai-novelia-js/refs/heads/main/Novelia%20%E5%8A%9F%E8%83%BD%E5%A2%9E%E5%BC%BA%E5%A5%97%E4%BB%B6.js
 // ==/UserScript==
@@ -533,10 +533,7 @@
                     const mainDiv = el.querySelector('.n-list-item__main > div');
                     if (!mainDiv) return;
 
-                    // 获取所有的 <a> 标签
                     const allLinks = Array.from(mainDiv.querySelectorAll('a'));
-
-                    // 🌟 修复 1：通过是否包含 ?query= 来精准区分书名链接和标签链接
                     const titleLink = allLinks.find(a => !a.href.includes('?query=')) || allLinks[0];
                     const tags = allLinks.filter(a => a.href.includes('?query=')).map(a => a.textContent.trim());
 
@@ -601,7 +598,6 @@
             const fields = megaState.extractData.some(b => b.type === 'wenku') ? megaState.settings.fields_wenku : megaState.settings.fields_web;
             megaState.selectedExtract.forEach(idx => {
                 const b = megaState.extractData[idx];
-                // 🌟 修复 2：补全 {{tags}} 的替换逻辑
                 let text = fields.filter(f => f.active).map(f => f.format
                     .replace(/{{jp_title}}/g, b.jp_title||b.cn_title||'')
                     .replace(/{{cn_title}}/g, b.cn_title||b.jp_title)
@@ -783,7 +779,16 @@
                                 <button class="m-btn m-btn-default" id="btn-rename-list">重命名</button>
                                 <button class="m-btn m-btn-default m-btn-danger" id="btn-del-list">删除</button>
                                 <div style="flex:1"></div>
+
+                                <select id="sel-rating-val" class="m-input" style="width:60px; padding:0 4px;">
+                                    <option value="5">5星</option>
+                                    <option value="4">4星</option>
+                                    <option value="3">3星</option>
+                                    <option value="2">2星</option>
+                                    <option value="1">1星</option>
+                                </select>
                                 <button class="m-btn m-btn-default" id="btn-insert-rating">★ 评分</button>
+
                                 <button class="m-btn m-btn-default" id="btn-preview-list">👀 预览</button>
                                 <button class="m-btn m-btn-default" id="btn-copy-list">复制内容</button>
                             </div>
@@ -951,15 +956,16 @@
             }
         };
 
+        // 🌟 修复：直接从下拉框读取星级，免除弹窗，插入标准的 ::: star 格式
         document.getElementById('btn-insert-rating').onclick = () => {
-            const rating = prompt("请输入评分 (例如: ★★★★☆ 或 9.5/10)：", "★★★★☆");
-            if(rating && ed) {
+            const val = document.getElementById('sel-rating-val').value;
+            if(ed) {
                 const start = ed.selectionStart;
                 const end = ed.selectionEnd;
                 const text = ed.value;
                 const before = text.substring(0, start);
                 const after  = text.substring(end, text.length);
-                const insertText = `**评分**：${rating}  \n`;
+                const insertText = `\n::: star ${val}\n`;
                 ed.value = before + insertText + after;
                 megaState.lists[megaState.currentListId] = [ed.value];
                 saveLists();
@@ -968,6 +974,7 @@
             }
         };
 
+        // 🌟 预览引擎增强：支持解析 ::: star 语法为绿色星星
         document.getElementById('btn-preview-list').onclick = () => {
             const previewDiv = document.getElementById('preview-container');
             const btn = document.getElementById('btn-preview-list');
@@ -979,7 +986,20 @@
                     .replace(/### \[(.*?)\]\((.*?)\)/g, '<h3 style="margin: 14px 0 6px 0;"><a href="$2" target="_blank" style="color:var(--mega-primary); text-decoration:none;">$1</a></h3>')
                     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
                     .replace(/---/g, '<hr style="border:none; border-top:1px dashed rgba(128,128,128,0.3); margin:12px 0;">')
+                    // 解析评分星星
+                    .replace(/:::\s*star\s+([0-5](?:\.\d+)?)/g, (match, p1) => {
+                        const score = parseFloat(p1);
+                        let starsHtml = '';
+                        for(let i=1; i<=5; i++) {
+                            const color = i <= score ? '#4fb233' : 'rgb(219, 219, 223)';
+                            starsHtml += `<div style="display:inline-flex; align-items:center; justify-content:center; margin-right:4px;">
+                                <svg viewBox="0 0 512 512" style="width:20px; height:20px; fill:${color};"><path d="M394 480a16 16 0 01-9.39-3L256 383.76 127.39 477a16 16 0 01-24.55-18.08L153 310.35 23 221.2a16 16 0 019-29.2h160.38l48.4-148.95a16 16 0 0130.44 0l48.4 149H480a16 16 0 019.05 29.2L359 310.35l50.13 148.53A16 16 0 01394 480z"></path></svg>
+                            </div>`;
+                        }
+                        return `<div style="display:inline-flex; align-items:center; margin: 8px 0;">${starsHtml}</div>`;
+                    })
                     .replace(/\n/g, '<br>');
+
                 previewDiv.innerHTML = html;
                 previewDiv.style.display = 'block';
                 ed.style.display = 'none';
