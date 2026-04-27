@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Novelia 功能增强套件
 // @namespace    https://n.novelia.cc/
-// @version      2.4.1
+// @version      2.4.2
 // @description  整合LightNovel搜索、书单助手、黑名单、简介排版、论坛管理。支持统一UI、字段排序、书单预览与导入导出。
 // @author       Gemini
 // @match        https://n.novelia.cc/*
@@ -320,7 +320,7 @@
 
         const formatText = (text) => {
             let cleanText = text.replace(/[\s\u3000]+/g, '');
-            if (cleanText.length > 500) return text;
+            if (cleanText.length > 1000) return text;
             let lines = [], p = 0;
             const puncRegex = /[。\.！!？\?—\-；;：:”’」』》>）\)】\]}…]/;
 
