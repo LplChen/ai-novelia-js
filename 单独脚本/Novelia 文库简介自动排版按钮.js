@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         Novelia 文库简介自动排版按钮
 // @namespace    http://tampermonkey.net/
-// @version      4.1
-// @description  自动排版文库小说简介，去除空格空行，按71字加标点折行，智能匹配引号及特殊符号
+// @version      4.2
+// @description  自动排版文库小说简介，去除空格空行，按71字加标点折行，智能匹配引号及特殊符号（支持1000字内）
 // @author       Gemini
 // @match        https://n.novelia.cc/*
 // @grant        none
-// @updateURL     https://raw.githubusercontent.com/LplChen/ai-novelia-js/refs/heads/main/%E5%8D%95%E7%8B%AC%E8%84%9A%E6%9C%AC/Novelia%20%E6%96%87%E5%BA%93%E7%AE%80%E4%BB%8B%E8%87%AA%E5%8A%A8%E6%8E%92%E7%89%88%E6%8C%89%E9%92%AE.js
-// @downloadURL   https://raw.githubusercontent.com/LplChen/ai-novelia-js/refs/heads/main/%E5%8D%95%E7%8B%AC%E8%84%9A%E6%9C%AC/Novelia%20%E6%96%87%E5%BA%93%E7%AE%80%E4%BB%8B%E8%87%AA%E5%8A%A8%E6%8E%92%E7%89%88%E6%8C%89%E9%92%AE.js
+// @updateURL    https://raw.githubusercontent.com/LplChen/ai-novelia-js/refs/heads/main/%E5%8D%95%E7%8B%AC%E8%84%9A%E6%9C%AC/Novelia%20%E6%96%87%E5%BA%93%E7%AE%80%E4%BB%8B%E8%87%AA%E5%8A%A8%E6%8E%92%E7%89%88%E6%8C%89%E9%92%AE.js
+// @downloadURL  https://raw.githubusercontent.com/LplChen/ai-novelia-js/refs/heads/main/%E5%8D%95%E7%8B%AC%E8%84%9A%E6%9C%AC/Novelia%20%E6%96%87%E5%BA%93%E7%AE%80%E4%BB%8B%E8%87%AA%E5%8A%A8%E6%8E%92%E7%89%88%E6%8C%89%E9%92%AE.js
 // ==/UserScript==
 
 (function() {
@@ -15,11 +15,11 @@
 
     // 核心排版逻辑
     function formatText(text) {
-        // 1. 去除所有全角/半角空格和空行(换行符)
-        let cleanText = text.替换(/[\s\u3000]+/g, '');
+        // 1. 去除所有全角/半角空格和空行(换行符) - 修复了“替换”的拼写错误
+        let cleanText = text.replace(/[\s\u3000]+/g, '');
 
-        // 2. 如果清理后字数依然超过500，终止排版，直接返回原文本
-        if (cleanText.length > 500) return text;
+        // 2. 如果清理后字数依然超过1000，终止排版，直接返回原文本
+        if (cleanText.length > 1000) return text;
 
         let lines = [];
         let p = 0;
