@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Novelia 功能增强套件
 // @namespace    https://n.novelia.cc/
-// @version      3.0.0
-// @description  整合LightNovel搜索、书单助手、黑名单、简介排版。支持统一UI、字段排序、书单预览与导入导出。
+// @version      3.0.1
+// @description  整合LightNovel搜索、书单助手、黑名单、简介排版、文库评论数与滚动切换评论区。支持统一UI、字段排序、书单预览与导入导出。
 // @author       Deepseek
 // @match        https://n.novelia.cc/*
 // @match        https://forum.novelia.cc/*
@@ -51,6 +51,8 @@
             enableBookList: true,
             enableBlacklist: true,
             enableFormatter: true,
+            enableCommentCount: true,
+            enableScrollSwitch: true,
             fields_web: DEFAULT_FIELDS_WEB,
             fields_wenku: DEFAULT_FIELDS_WENKU
         }),
@@ -67,12 +69,12 @@
     // --- 历史乱码修复：UTF-8 被当作 Latin-1 解码 ---
     function fixMojibake(s) {
         if (typeof s !== 'string' || !s) return s;
-        if (!/[\u00C0-\u00FF]/.test(s)) return s; // 没有 Latin-1 高位字符，直接返回
+        if (!/[\u00C0-\u00FF]/.test(s)) return s;
         try {
             const bytes = new Uint8Array(s.length);
             for (let i = 0; i < s.length; i++) {
                 const code = s.charCodeAt(i);
-                if (code > 0xFF) return s; // 混合了非 Latin-1 字符，放弃修复
+                if (code > 0xFF) return s;
                 bytes[i] = code;
             }
             return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -100,6 +102,9 @@
 
     if (!megaState.settings.fields_web) megaState.settings.fields_web = DEFAULT_FIELDS_WEB;
     if (!megaState.settings.fields_wenku) megaState.settings.fields_wenku = DEFAULT_FIELDS_WENKU;
+
+    if (megaState.settings.enableCommentCount === undefined) megaState.settings.enableCommentCount = true;
+    if (megaState.settings.enableScrollSwitch === undefined) megaState.settings.enableScrollSwitch = true;
 
     megaState.settings.fields_web = sanitizeFields(megaState.settings.fields_web, DEFAULT_FIELDS_WEB);
     megaState.settings.fields_wenku = sanitizeFields(megaState.settings.fields_wenku, DEFAULT_FIELDS_WENKU);
@@ -332,7 +337,7 @@
     function initFormatter() {
         if (!megaState.settings.enableFormatter || !IS_NOVELIA_MAIN) return;
 
-        const FORMATTER_LINE_WIDTH = 66; // 若以后站点再次改版，只改这里
+        const FORMATTER_LINE_WIDTH = 66;
 
         const formatText = (text) => {
             let cleanText = text.replace(/[\s\u3000]+/g, '');
@@ -418,13 +423,11 @@
         const isWenku = url.includes('/wenku') || url.includes('/favorite/wenku');
         let items = [];
 
-        // ---------- 新论坛：从帖子内容中提取书籍链接 ----------
         if (IS_NOVELIA_FORUM) {
             const seen = new Set();
             document.querySelectorAll('a[href*="/novel/"], a[href*="/wenku"]').forEach(link => {
                 try {
                     const href = link.href;
-                    // 仅保留指向 Novelia 主站的链接
                     if (!href.includes('novelia.cc') && !href.includes('sakura-share.one')) return;
                     if (seen.has(href)) return;
                     seen.add(href);
@@ -445,7 +448,6 @@
             return items;
         }
 
-        // ---------- 主站：网络小说 / 收藏 / 阅读历史 ----------
         if (url.includes('/novel') || url.includes('/favorite/web') || url.includes('/read-history')) {
             document.querySelectorAll('.n-list-item').forEach(el => {
                 try {
@@ -479,7 +481,6 @@
                 }
             });
         } else if (isWenku) {
-            // ---------- 主站：文库 ----------
             document.querySelectorAll('.n-grid > div').forEach(el => {
                 try {
                     const linkEl = el.querySelector('a');
@@ -543,6 +544,364 @@
         });
         const sel = document.getElementById('sel-target-list'); sel.innerHTML = '';
         Object.keys(megaState.lists || {}).forEach(k => sel.appendChild(new Option(k, k, false, k === megaState.currentListId)));
+    }
+
+    // ============================================================
+    // 模块 5：文库详情页优化（评论数显示 / 目录滚动切换评论区）
+    // ============================================================
+    const WENKU_SCROLL_THRESHOLD = 5;
+    const WENKU_SWITCH_COOLDOWN = 1500;
+
+    let wenkuCommentTotal = null;
+    let wenkuLastId = null;
+    let wenkuScrollBound = false;
+    let wenkuInterceptorsInstalled = false;
+    let wenkuToastStylesInjected = false;
+    let wenkuToastEl = null;
+    let wenkuHasShownPopup = false;
+    let wenkuAccumulatedDelta = 0;
+    let wenkuLastScrollTime = 0;
+
+    function isWenkuDetailPage() {
+        return IS_NOVELIA_MAIN && /^\/wenku\/[a-f0-9]+/i.test(location.pathname);
+    }
+
+    function getWenkuId() {
+        const m = location.pathname.match(/\/wenku\/([a-f0-9]+)/i);
+        return m ? m[1] : null;
+    }
+
+    function findCommentTab() {
+        for (const tab of document.querySelectorAll('.n-tabs-tab')) {
+            if (tab.querySelector('.n-tabs-tab__label')?.textContent.includes('评论区')) return tab;
+        }
+        return null;
+    }
+
+    function findTocTab() {
+        for (const tab of document.querySelectorAll('.n-tabs-tab')) {
+            if (tab.querySelector('.n-tabs-tab__label')?.textContent.includes('目录')) return tab;
+        }
+        return null;
+    }
+
+    // 判断当前页面是否为深色模式（沿用脚本一 v1.2 逻辑）
+    function isWenkuDarkMode() {
+        const ntrRoot = document.getElementById('ntr-web-novel');
+        if (ntrRoot && ntrRoot.getAttribute('data-theme')) {
+            return ntrRoot.getAttribute('data-theme') === 'dark';
+        }
+        const bg = window.getComputedStyle(document.body).backgroundColor;
+        if (bg === 'rgb(16, 16, 20)' || bg === 'rgb(24, 24, 28)') return true;
+        return document.querySelector('[class*="-dark-"]') !== null;
+    }
+
+    function ensureCommentBadge() {
+        if (wenkuCommentTotal === null) return;
+        const tab = findCommentTab();
+        if (!tab) return;
+        const label = tab.querySelector('.n-tabs-tab__label');
+        if (!label) return;
+        const desired = `评论区 [${wenkuCommentTotal}]`;
+        if (label.textContent !== desired) label.textContent = desired;
+    }
+
+    function resetCommentLabel() {
+        const tab = findCommentTab();
+        const label = tab?.querySelector('.n-tabs-tab__label');
+        if (label && label.textContent !== '评论区') label.textContent = '评论区';
+    }
+
+    function setCommentTotal(total) {
+        if (typeof total !== 'number') return;
+        wenkuCommentTotal = total;
+        ensureCommentBadge();
+    }
+
+    function fetchCommentTotal(id) {
+        return fetch(
+            `https://forum.novelia.cc/api/v1/external/comment/novel/wenku-${id}?page=1&page_size=10`,
+            { credentials: 'omit' }
+        )
+        .then(r => r.ok ? r.json() : null)
+        .then(data => (data && typeof data.total === 'number') ? data.total : null)
+        .catch(err => {
+            console.warn('[Novelia 评论数] 主动请求失败:', err);
+            return null;
+        });
+    }
+
+    function installWenkuNetworkInterceptors() {
+        if (wenkuInterceptorsInstalled) return;
+        wenkuInterceptorsInstalled = true;
+
+        const origFetch = window.fetch;
+        window.fetch = function (...args) {
+            const url = args[0] instanceof Request ? args[0].url : String(args[0]);
+            return origFetch.apply(this, args).then(resp => {
+                if (wenkuCommentTotal === null && /external\/comment|\/comment\/novel/i.test(url)) {
+                    resp.clone().json().then(data => {
+                        if (data && typeof data.total === 'number') setCommentTotal(data.total);
+                    }).catch(() => {});
+                }
+                return resp;
+            });
+        };
+
+        const origOpen = XMLHttpRequest.prototype.open;
+        XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+            this.addEventListener('load', function () {
+                if (wenkuCommentTotal === null && typeof url === 'string' && /external\/comment|\/comment\/novel/i.test(url)) {
+                    try {
+                        const data = JSON.parse(this.responseText);
+                        if (data && typeof data.total === 'number') setCommentTotal(data.total);
+                    } catch (e) {}
+                }
+            });
+            return origOpen.call(this, method, url, ...rest);
+        };
+    }
+
+    function watchCommentTab() {
+        let retries = 0;
+        const bind = () => {
+            if (!megaState.settings.enableCommentCount || !isWenkuDetailPage()) return;
+            const tab = findCommentTab();
+            if (!tab) {
+                if (retries++ < 50) setTimeout(bind, 300);
+                return;
+            }
+            ensureCommentBadge();
+            if (tab.__noveliaCommentObserved) return;
+            tab.__noveliaCommentObserved = true;
+
+            const mo = new MutationObserver(() => {
+                if (wenkuCommentTotal === null) return;
+                ensureCommentBadge();
+            });
+            mo.observe(tab, { childList: true, subtree: true, characterData: true });
+        };
+        bind();
+    }
+
+    function initCommentCount() {
+        if (!isWenkuDetailPage()) return;
+        const id = getWenkuId();
+        if (!id) return;
+
+        if (id !== wenkuLastId) {
+            wenkuLastId = id;
+            wenkuCommentTotal = null;
+            resetCommentLabel();
+        }
+
+        if (wenkuCommentTotal === null) {
+            fetchCommentTotal(id).then(total => {
+                if (total !== null && getWenkuId() === id) setCommentTotal(total);
+            });
+        }
+        watchCommentTab();
+    }
+
+    function injectWenkuToastStyles() {
+        if (wenkuToastStylesInjected) return;
+        wenkuToastStylesInjected = true;
+        const style = document.createElement('style');
+        style.id = 'novelia-toast-style';
+        style.textContent = `
+        #novelia-scroll-toast {
+            position: fixed;
+            bottom: 36px;
+            left: 50%;
+            transform: translateX(-50%) translateY(16px) scale(0.96);
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 18px;
+            border-radius: 999px;
+            font-size: 13.5px;
+            font-weight: 500;
+            font-family: v-sans, system-ui, -apple-system, sans-serif;
+            white-space: nowrap;
+            pointer-events: none;
+            z-index: 9999;
+            opacity: 0;
+            transition: opacity .25s ease, transform .25s cubic-bezier(.2,.8,.2,1);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
+        /* 深色主题 */
+        #novelia-scroll-toast.dark-theme {
+            background-color: rgba(36, 36, 42, 0.92);
+            color: rgba(255, 255, 255, 0.88);
+            border: 1px solid rgba(99, 226, 183, 0.35);
+            box-shadow: 0 6px 24px rgba(0,0,0,0.55), 0 1px 3px rgba(0,0,0,0.12);
+        }
+        /* 亮色主题 */
+        #novelia-scroll-toast.light-theme {
+            background-color: rgba(255, 255, 255, 0.95);
+            color: rgb(51, 54, 57);
+            border: 1px solid rgba(24, 160, 88, 0.35);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
+        }
+        #novelia-scroll-toast.novelia-toast-show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0) scale(1);
+        }
+        #novelia-scroll-toast .toast-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            flex: none;
+            animation: novelia-toast-bounce 1.2s ease-in-out infinite;
+        }
+        #novelia-scroll-toast.dark-theme .toast-icon {
+            color: #63e2b7;
+            background: rgba(99, 226, 183, 0.14);
+        }
+        #novelia-scroll-toast.light-theme .toast-icon {
+            color: #18a058;
+            background: rgba(24, 160, 88, 0.12);
+        }
+        @keyframes novelia-toast-bounce {
+            0%, 100% { transform: translateY(0); }
+            50%      { transform: translateY(3px); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            #novelia-scroll-toast,
+            #novelia-scroll-toast.novelia-toast-show { transition: none; }
+            #novelia-scroll-toast .toast-icon { animation: none; }
+        }
+        `;
+        document.head.appendChild(style);
+    }
+
+    function showWenkuToast(text = '向下再滚动一次进入评论区') {
+        injectWenkuToastStyles();
+        if (!wenkuToastEl) {
+            wenkuToastEl = document.createElement('div');
+            wenkuToastEl.id = 'novelia-scroll-toast';
+            wenkuToastEl.innerHTML = `
+            <span class="toast-icon">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
+                    <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6l-6-6l1.41-1.41z"></path>
+                </svg>
+            </span>
+            <span class="toast-text"></span>
+        `;
+            document.body.appendChild(wenkuToastEl);
+        }
+        wenkuToastEl.querySelector('.toast-text').textContent = text;
+
+        // 每次弹出按当前主题切换皮肤
+        wenkuToastEl.classList.remove('dark-theme', 'light-theme');
+        wenkuToastEl.classList.add(isWenkuDarkMode() ? 'dark-theme' : 'light-theme');
+
+        // 强制重排，确保从隐藏态过渡到显示态
+        void wenkuToastEl.offsetWidth;
+        wenkuToastEl.classList.add('novelia-toast-show');
+    }
+
+    function hideWenkuToast() {
+        if (!wenkuToastEl) return;
+        wenkuToastEl.classList.remove('novelia-toast-show');
+    }
+
+    function switchToCommentTab() {
+        const tab = findCommentTab();
+        if (tab) tab.click();
+        wenkuHasShownPopup = false;
+        hideWenkuToast();
+        wenkuAccumulatedDelta = 0;
+    }
+
+    function initScrollSwitch() {
+        if (wenkuScrollBound) return;
+        wenkuScrollBound = true;
+
+        window.addEventListener('wheel', (e) => {
+            if (!megaState.settings.enableScrollSwitch || !isWenkuDetailPage()) {
+                hideWenkuToast();
+                wenkuHasShownPopup = false;
+                wenkuAccumulatedDelta = 0;
+                return;
+            }
+            const tocTab = findTocTab();
+            if (!tocTab || !tocTab.classList.contains('n-tabs-tab--active')) {
+                hideWenkuToast();
+                wenkuAccumulatedDelta = 0;
+                return;
+            }
+            const scrollTop = window.scrollY || document.documentElement.scrollTop;
+            const scrollHeight = document.documentElement.scrollHeight;
+            const clientHeight = document.documentElement.clientHeight;
+            const dist = scrollHeight - (scrollTop + clientHeight);
+            const atBottom = dist <= WENKU_SCROLL_THRESHOLD;
+
+            if (atBottom && e.deltaY > 0) {
+                const now = Date.now();
+                if (now - wenkuLastScrollTime < WENKU_SWITCH_COOLDOWN) return;
+                if (!wenkuHasShownPopup) {
+                    wenkuHasShownPopup = true;
+                    wenkuAccumulatedDelta = e.deltaY;
+                    showWenkuToast('向下再滚动一次进入评论区');
+                    wenkuLastScrollTime = now;
+                } else {
+                    wenkuAccumulatedDelta += e.deltaY;
+                    if (wenkuAccumulatedDelta > 30) {
+                        switchToCommentTab();
+                        wenkuLastScrollTime = now;
+                    }
+                }
+            } else if (!atBottom) {
+                hideWenkuToast();
+                wenkuHasShownPopup = false;
+                wenkuAccumulatedDelta = 0;
+            }
+        }, { passive: true });
+
+        window.addEventListener('scroll', () => {
+            if (!megaState.settings.enableScrollSwitch) return;
+            const scrollTop = window.scrollY || document.documentElement.scrollTop;
+            const scrollHeight = document.documentElement.scrollHeight;
+            const clientHeight = document.documentElement.clientHeight;
+            if (scrollHeight - (scrollTop + clientHeight) > WENKU_SCROLL_THRESHOLD) {
+                hideWenkuToast();
+                wenkuHasShownPopup = false;
+                wenkuAccumulatedDelta = 0;
+            }
+        }, { passive: true });
+    }
+
+    function initWenkuDetail() {
+        if (!IS_NOVELIA_MAIN) return;
+
+        if (!isWenkuDetailPage()) {
+            hideWenkuToast();
+            wenkuHasShownPopup = false;
+            wenkuAccumulatedDelta = 0;
+            return;
+        }
+
+        if (megaState.settings.enableCommentCount) {
+            installWenkuNetworkInterceptors();
+            initCommentCount();
+        } else {
+            resetCommentLabel();
+            wenkuCommentTotal = null;
+            wenkuLastId = null;
+        }
+
+        if (megaState.settings.enableScrollSwitch) {
+            initScrollSwitch();
+        } else {
+            hideWenkuToast();
+            wenkuHasShownPopup = false;
+            wenkuAccumulatedDelta = 0;
+        }
     }
 
     // ============================================================
@@ -662,6 +1021,8 @@
                             <div class="m-setting-row"><span>启用 书单抓取与制作助手</span><div class="m-switch" data-key="enableBookList"></div></div>
                             <div class="m-setting-row"><span>启用 小说搜索列表黑名单隐藏机制</span><div class="m-switch" data-key="enableBlacklist"></div></div>
                             <div class="m-setting-row"><span>启用 文库编辑页简介自动排版</span><div class="m-switch" data-key="enableFormatter"></div></div>
+                            <div class="m-setting-row"><span>启用 文库评论数显示（仅文库详情页）</span><div class="m-switch" data-key="enableCommentCount"></div></div>
+                            <div class="m-setting-row"><span>启用 目录滚动切换评论区（仅文库详情页）</span><div class="m-switch" data-key="enableScrollSwitch"></div></div>
 
                             <h3 style="margin-top:20px;">抓取字段排版设置</h3>
                             <div>
@@ -865,7 +1226,14 @@
             sw.onclick = () => {
                 megaState.settings[key] = !megaState.settings[key];
                 sw.classList.toggle('active', megaState.settings[key]);
-                saveSettings(); showToast('设置已保存，刷新页面后生效');
+                saveSettings();
+                if (key === 'enableCommentCount' || key === 'enableScrollSwitch') {
+                    // 文库详情页功能：切换后立即生效，无需刷新
+                    initWenkuDetail();
+                    showToast('设置已保存');
+                } else {
+                    showToast('设置已保存，刷新页面后生效');
+                }
             };
         });
 
@@ -964,16 +1332,23 @@
             if (oldOverlay) oldOverlay.remove();
             initMegaUI();
         }
+
+        // 文库详情页优化（评论数 / 滚动切换评论区）
+        initWenkuDetail();
     }
 
     const pushState = history.pushState;
     history.pushState = function() {
         pushState.apply(history, arguments);
         megaState.extractData = [];
+        if (getWenkuId() !== wenkuLastId) wenkuCommentTotal = null;
+        setTimeout(initWenkuDetail, 50);
         setTimeout(initMegaPack, 500);
     };
     window.addEventListener('popstate', () => {
         megaState.extractData = [];
+        if (getWenkuId() !== wenkuLastId) wenkuCommentTotal = null;
+        setTimeout(initWenkuDetail, 50);
         setTimeout(initMegaPack, 500);
     });
 
