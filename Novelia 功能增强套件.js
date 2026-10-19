@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Novelia 功能增强套件
 // @namespace    https://n.novelia.cc/
-// @version      3.0.1
-// @description  整合LightNovel搜索、书单助手、黑名单、简介排版、文库评论数与滚动切换评论区。支持统一UI、字段排序、书单预览与导入导出。
+// @version      3.0.2
+// @description  整合LightNovel搜索、书单助手、黑名单、简介排版、文库评论数与滚动切换、分卷按时间排序。支持统一UI、字段排序、书单预览与导入导出。
 // @author       Deepseek
 // @match        https://n.novelia.cc/*
 // @match        https://forum.novelia.cc/*
@@ -53,6 +53,7 @@
             enableFormatter: true,
             enableCommentCount: true,
             enableScrollSwitch: true,
+            enableVolumeSort: true,
             fields_web: DEFAULT_FIELDS_WEB,
             fields_wenku: DEFAULT_FIELDS_WENKU
         }),
@@ -103,8 +104,10 @@
     if (!megaState.settings.fields_web) megaState.settings.fields_web = DEFAULT_FIELDS_WEB;
     if (!megaState.settings.fields_wenku) megaState.settings.fields_wenku = DEFAULT_FIELDS_WENKU;
 
+    // 旧版本升级：补全新开关默认值
     if (megaState.settings.enableCommentCount === undefined) megaState.settings.enableCommentCount = true;
     if (megaState.settings.enableScrollSwitch === undefined) megaState.settings.enableScrollSwitch = true;
+    if (megaState.settings.enableVolumeSort === undefined) megaState.settings.enableVolumeSort = true;
 
     megaState.settings.fields_web = sanitizeFields(megaState.settings.fields_web, DEFAULT_FIELDS_WEB);
     megaState.settings.fields_wenku = sanitizeFields(megaState.settings.fields_wenku, DEFAULT_FIELDS_WENKU);
@@ -905,6 +908,249 @@
     }
 
     // ============================================================
+    // 模块 6：文库分卷按时间排序（仅 /wenku-edit）
+    // ============================================================
+    let wenkuSortObserverAttached = false;
+
+    function wenkuSortParseTime(str) {
+        if (!str) return Infinity;
+        const cleanStr = str.trim();
+        const timestamp = Date.parse(cleanStr);
+        return isNaN(timestamp) ? Infinity : timestamp;
+    }
+
+    function wenkuSortExtractItemInfo(li, index) {
+        const asinEl = li.querySelector('a[href*="/dp/"]');
+        const asin = asinEl ? asinEl.textContent.trim() : `idx_${index}`;
+        const timeEl = li.querySelector('.n-text time') || li.querySelector('time');
+        const timeStr = timeEl ? timeEl.textContent.trim() : '';
+        return {
+            asin,
+            time: wenkuSortParseTime(timeStr),
+            timeStr,
+            originalIndex: index
+        };
+    }
+
+    async function wenkuSortVolumes(volumeFormItem, btnContent) {
+        if (!volumeFormItem) return;
+        const blank = volumeFormItem.querySelector('.n-form-item-blank');
+        if (!blank) return;
+
+        const items = Array.from(blank.querySelectorAll('li.n-list-item'));
+        if (items.length <= 1) {
+            alert('分卷数量不足，无需排序');
+            return;
+        }
+
+        const targetOrder = items.map((li, idx) => wenkuSortExtractItemInfo(li, idx));
+
+        targetOrder.sort((a, b) => {
+            if (a.time === b.time) return a.originalIndex - b.originalIndex;
+            return a.time - b.time;
+        });
+
+        const isAlreadySorted = targetOrder.every((item, idx) => item.originalIndex === idx);
+        if (isAlreadySorted) {
+            if (btnContent) {
+                const oldText = btnContent.textContent;
+                btnContent.textContent = '已是最新顺序 ✓';
+                setTimeout(() => { btnContent.textContent = oldText; }, 1500);
+            }
+            return;
+        }
+
+        if (btnContent) btnContent.textContent = '排序中...';
+
+        // 主方案：依次触发每个分卷自带的「移至底部」按钮
+        let clickedSuccess = false;
+        try {
+            for (const target of targetOrder) {
+                const currentItems = Array.from(blank.querySelectorAll('li.n-list-item'));
+                const targetLi = currentItems.find(li => {
+                    const a = li.querySelector('a[href*="/dp/"]');
+                    return a && a.textContent.trim() === target.asin;
+                });
+
+                if (targetLi) {
+                    const extraBtns = targetLi.querySelectorAll('.n-thing-header__extra button');
+                    if (extraBtns && extraBtns.length >= 2) {
+                        extraBtns[1].click();
+                        clickedSuccess = true;
+                    }
+                }
+            }
+            await new Promise(resolve => setTimeout(resolve, 50));
+        } catch (err) {
+            console.error('[Novelia Sort] 触发内置移动按钮失败:', err);
+        }
+
+        // 兜底方案：深入 Vue Ref 数组原地排序
+        const afterItems = Array.from(blank.querySelectorAll('li.n-list-item'));
+        const firstAsinAfter = afterItems[0]?.querySelector('a[href*="/dp/"]')?.textContent.trim();
+
+        if (!clickedSuccess || firstAsinAfter !== targetOrder[0].asin) {
+            try {
+                let el = blank;
+                let comp = null;
+                while (el && el !== document.body) {
+                    if (el.__vueParentComponent) {
+                        comp = el.__vueParentComponent;
+                        break;
+                    }
+                    el = el.parentElement;
+                }
+
+                function findVolumeArray(obj, visited = new Set(), depth = 0) {
+                    if (!obj || typeof obj !== 'object' || depth > 7 || visited.has(obj)) return null;
+                    visited.add(obj);
+
+                    if (Array.isArray(obj) && obj.length === items.length) {
+                        const first = obj[0];
+                        if (first && typeof first === 'object' && ('asin' in first || 'titleEs' in first || 'titleJp' in first || 'cover' in first)) {
+                            return obj;
+                        }
+                    }
+
+                    if ('value' in obj && obj.value) {
+                        const res = findVolumeArray(obj.value, visited, depth + 1);
+                        if (res) return res;
+                    }
+                    if ('_value' in obj && obj._value) {
+                        const res = findVolumeArray(obj._value, visited, depth + 1);
+                        if (res) return res;
+                    }
+
+                    for (const key of Object.keys(obj)) {
+                        if (key === 'dep' || key === '__v_raw' || key.startsWith('$')) continue;
+                        try {
+                            const res = findVolumeArray(obj[key], visited, depth + 1);
+                            if (res) return res;
+                        } catch (e) {}
+                    }
+                    return null;
+                }
+
+                let cur = comp;
+                let volArr = null;
+                while (cur && !volArr) {
+                    if (cur.setupState) volArr = findVolumeArray(cur.setupState);
+                    if (!volArr && cur.ctx) volArr = findVolumeArray(cur.ctx);
+                    if (!volArr && cur.data) volArr = findVolumeArray(cur.data);
+                    cur = cur.parent;
+                }
+
+                if (volArr) {
+                    const orderMap = new Map();
+                    targetOrder.forEach((item, idx) => orderMap.set(item.asin, idx));
+                    volArr.sort((a, b) => (orderMap.get(a.asin) ?? 9999) - (orderMap.get(b.asin) ?? 9999));
+                    console.log('[Novelia Sort] 已通过 Vue Ref 数组完成排序');
+                }
+            } catch (e) {
+                console.error('[Novelia Sort] Vue Ref 数组排序异常:', e);
+            }
+        }
+
+        if (btnContent) {
+            btnContent.textContent = '排序完成 ✓';
+            setTimeout(() => {
+                btnContent.textContent = '时间排序';
+            }, 1500);
+        }
+    }
+
+    function injectVolumeSortButton() {
+        if (!megaState.settings.enableVolumeSort) return;
+        if (!location.pathname.startsWith('/wenku-edit')) return;
+        if (document.getElementById('wenku-time-sort-btn')) return;
+
+        const cols = document.querySelectorAll('div.n-col.n-col--24-span');
+        let targetFeedbackWrapper = null;
+        let volumeFormItem = null;
+
+        cols.forEach(col => {
+            const labelEl = col.querySelector('.n-form-item-label__text');
+            if (!labelEl) return;
+            const labelText = labelEl.textContent.trim();
+
+            if (labelText === '标签') {
+                targetFeedbackWrapper = col.querySelector('.n-form-item-feedback-wrapper');
+            }
+            if (labelText === '分卷') {
+                volumeFormItem = col.querySelector('.n-form-item');
+            }
+        });
+
+        if (!targetFeedbackWrapper || !volumeFormItem) return;
+
+        targetFeedbackWrapper.style.display = 'flex';
+        targetFeedbackWrapper.style.justifyContent = 'flex-end';
+        targetFeedbackWrapper.style.alignItems = 'center';
+
+        const existingPrimaryBtn = document.querySelector('#mega-format-btn') || document.querySelector('button.n-button--primary-type');
+        const btnClass = existingPrimaryBtn
+            ? existingPrimaryBtn.className
+            : 'n-button n-button--primary-type n-button--medium-type';
+
+        const sortBtn = document.createElement('button');
+        sortBtn.id = 'wenku-time-sort-btn';
+        sortBtn.type = 'button';
+        sortBtn.className = btnClass;
+
+        sortBtn.style.cssText = `
+            height: 1.25em;
+            line-height: 1.25;
+            min-height: unset;
+            padding: 0px 10px;
+            font-size: 12px;
+            background-color: var(--n-color, #63e2b7);
+            color: #000000 !important;
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+        `;
+
+        const btnContent = document.createElement('span');
+        btnContent.className = 'n-button__content';
+        btnContent.textContent = '时间排序';
+        btnContent.style.cssText = 'color: #000000 !important; text-align: center;';
+
+        sortBtn.appendChild(btnContent);
+
+        sortBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            wenkuSortVolumes(volumeFormItem, btnContent);
+        });
+
+        targetFeedbackWrapper.appendChild(sortBtn);
+    }
+
+    function initVolumeSort() {
+        if (wenkuSortObserverAttached) {
+            // 已挂载，仅根据开关状态操作按钮
+            if (megaState.settings.enableVolumeSort && location.pathname.startsWith('/wenku-edit')) {
+                injectVolumeSortButton();
+            } else {
+                document.getElementById('wenku-time-sort-btn')?.remove();
+            }
+            return;
+        }
+        wenkuSortObserverAttached = true;
+
+        const observer = new MutationObserver(() => {
+            if (!megaState.settings.enableVolumeSort || !location.pathname.startsWith('/wenku-edit')) {
+                document.getElementById('wenku-time-sort-btn')?.remove();
+                return;
+            }
+            injectVolumeSortButton();
+        });
+
+        observer.observe(document.body, { childList: true, subtree: true });
+        injectVolumeSortButton();
+    }
+
+    // ============================================================
     // 初始化 UI 与事件
     // ============================================================
     function initMegaUI() {
@@ -1023,6 +1269,7 @@
                             <div class="m-setting-row"><span>启用 文库编辑页简介自动排版</span><div class="m-switch" data-key="enableFormatter"></div></div>
                             <div class="m-setting-row"><span>启用 文库评论数显示（仅文库详情页）</span><div class="m-switch" data-key="enableCommentCount"></div></div>
                             <div class="m-setting-row"><span>启用 目录滚动切换评论区（仅文库详情页）</span><div class="m-switch" data-key="enableScrollSwitch"></div></div>
+                            <div class="m-setting-row"><span>启用 文库分卷按时间排序（仅文库编辑页）</span><div class="m-switch" data-key="enableVolumeSort"></div></div>
 
                             <h3 style="margin-top:20px;">抓取字段排版设置</h3>
                             <div>
@@ -1228,8 +1475,10 @@
                 sw.classList.toggle('active', megaState.settings[key]);
                 saveSettings();
                 if (key === 'enableCommentCount' || key === 'enableScrollSwitch') {
-                    // 文库详情页功能：切换后立即生效，无需刷新
                     initWenkuDetail();
+                    showToast('设置已保存');
+                } else if (key === 'enableVolumeSort') {
+                    initVolumeSort();
                     showToast('设置已保存');
                 } else {
                     showToast('设置已保存，刷新页面后生效');
@@ -1335,6 +1584,8 @@
 
         // 文库详情页优化（评论数 / 滚动切换评论区）
         initWenkuDetail();
+        // 文库编辑页：分卷按时间排序
+        initVolumeSort();
     }
 
     const pushState = history.pushState;
@@ -1343,12 +1594,14 @@
         megaState.extractData = [];
         if (getWenkuId() !== wenkuLastId) wenkuCommentTotal = null;
         setTimeout(initWenkuDetail, 50);
+        setTimeout(initVolumeSort, 50);
         setTimeout(initMegaPack, 500);
     };
     window.addEventListener('popstate', () => {
         megaState.extractData = [];
         if (getWenkuId() !== wenkuLastId) wenkuCommentTotal = null;
         setTimeout(initWenkuDetail, 50);
+        setTimeout(initVolumeSort, 50);
         setTimeout(initMegaPack, 500);
     });
 
